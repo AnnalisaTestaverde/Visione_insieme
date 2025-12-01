@@ -12,7 +12,7 @@ const CONFIG = {
         infoBoxText: '#000000ff',
         infoBoxStroke: '#000000ff',
         timeline: '#FF2B00',
-        selectedContinent: '#c7afaf7e'
+        selectedContinent: '#b9b9b988'
     },
     layout: {
         centerXRatio: 0.5,
@@ -26,7 +26,13 @@ const CONFIG = {
         marginX: 60,
         fontSizeControls: 48,
         centerYOffset: 54,
-        topOffset: -20
+        topOffset: -20,
+        // NUOVA PROPRIETÀ PER POSIZIONARE LA LEGENDA
+        legendBoxY: 60,
+        // AUMENTATA L'ALTEZZA DELLA LEGENDA
+        legendBoxHeight: 300,
+        // POSIZIONE DELLA INFOBOX DEL VULCANO (più in basso)
+        volcanoInfoBoxY: 380
     },
     centuries: [
         { label: 'all centuries', value: null },
@@ -74,9 +80,11 @@ let state = {
     asiaLabelY: 0,
     // VARIABILI PER ANIMAZIONE
     animationTimer: 0,
-    animationSpeed: 200, // 0.2 secondi per ogni anno (ULTRARAPIDO)
-    pauseBetweenCycles: 1000, // 1 secondo di pausa tra i cicli
-    isPausedBetweenCycles: false
+    animationSpeed: 200,
+    pauseBetweenCycles: 1000,
+    isPausedBetweenCycles: false,
+    // NUOVA VARIABILE PER HOVER LEGENDA
+    hoveredImpactLevel: null
 };
 
 // Variabile per l'immagine di sfondo radiale
@@ -228,15 +236,29 @@ function getRadiusForImpact(impact) {
     const totalLevels = impactLevels.length;
     const normalized = idx / (totalLevels - 1);
     
+    // MANTENIAMO LA CORRISPONDENZA ORIGINALE: impatto 1 (più esterno) → maxRadius, impatto 16 (più interno) → minRadius
+    // Questo è già corretto nel codice esistente
     return map(normalized, 0, 1, CONFIG.layout.maxRadius, CONFIG.layout.minRadius);
 }
 
 function drawImpactCircles() {
     for (let i = 0; i < impactLevels.length; i++) {
-        let radius = map(i, 0, impactLevels.length - 1, CONFIG.layout.minRadius, CONFIG.layout.maxRadius);
+        // CALCOLA IL RAGGIO: dalla più interna (impatti alti) alla più esterna (impatti bassi)
+        // i=0 → impactLevels[0] (impatto più basso, es: 1) → raggio più GRANDE (esterno)
+        // i=ultimo → impactLevels[ultimo] (impatto più alto, es: 16) → raggio più PICCOLO (interno)
+        let radius = map(i, 0, impactLevels.length - 1, 
+                        CONFIG.layout.maxRadius, CONFIG.layout.minRadius);
         noFill();
-        stroke(CONFIG.colors.circle);
-        strokeWeight(0.5);
+        
+        // MODIFICATO: HOVER IN NERO
+        if (state.hoveredImpactLevel === impactLevels[i]) {
+            stroke(0); // NERO invece di CONFIG.colors.accent
+            strokeWeight(3);
+        } else {
+            stroke(CONFIG.colors.circle);
+            strokeWeight(0.5);
+        }
+        
         ellipse(0, 0, radius * 2);
     }
 }
@@ -320,7 +342,7 @@ function updateAnimation() {
         if (state.animationTimer >= state.pauseBetweenCycles) {
             state.animationTimer = 0;
             state.isPausedBetweenCycles = false;
-            state.currentYearIndex = 0; // Ricomincia dall'inizio
+            state.currentYearIndex = 0;
         }
         return;
     }
@@ -332,11 +354,9 @@ function updateAnimation() {
     if (state.animationTimer >= state.animationSpeed) {
         state.animationTimer = 0;
         
-        // Passa all'anno successivo
         if (state.currentYearIndex < years.length - 1) {
             state.currentYearIndex++;
         } else {
-            // Fine del ciclo, entra in pausa
             state.isPausedBetweenCycles = true;
             return;
         }
@@ -355,12 +375,16 @@ function draw() {
     updateAnimation();
     
     drawTitle();
+    drawLegendBox();
     drawInfoBox();
     drawMainCircle();
     drawContinentLabels();
     drawTemporalRangeSelector();
     drawYearSelector();
     drawSelectedYearCount();
+    
+    // Controlla hover della legenda
+    checkLegendHover();
 }
 
 function drawTitle() {
@@ -380,9 +404,94 @@ function drawTitle() {
     textStyle(NORMAL);
 }
 
+function drawLegendBox() {
+    const boxX = width - CONFIG.layout.infoBoxWidth - CONFIG.layout.marginX;
+    const boxY = CONFIG.layout.legendBoxY;
+    const boxW = CONFIG.layout.infoBoxWidth;
+    const boxH = CONFIG.layout.legendBoxHeight;
+    
+    // BOX BIANCO CON BORDO NERO
+    fill(CONFIG.colors.infoBox);
+    stroke(CONFIG.colors.infoBoxStroke);
+    strokeWeight(1);
+    rect(boxX, boxY, boxW, boxH, 10, 10, 10, 10);
+    
+    fill(CONFIG.colors.infoBoxText);
+    noStroke();
+    textFont('Helvetica');
+    textAlign(LEFT, TOP);
+    
+    // TITOLO LEGENDA
+    textSize(18);
+    textStyle(BOLD);
+    text('IMPACT LEVELS', boxX + 20, boxY + 20);
+    textStyle(NORMAL);
+    
+    // DESCRIZIONE
+    textSize(14);
+    text('Hover over impact levels to highlight', 
+         boxX + 20, boxY + 50);
+    text('corresponding circles', 
+         boxX + 20, boxY + 70);
+    
+    // LISTA DEI LIVELLI DI IMPATTO DIVISI IN DUE COLONNE
+    const startY = boxY + 95;
+    const levelSpacing = 25;
+    const columnWidth = (boxW - 40) / 2;
+    
+    // Calcola quanti livelli per colonna (circa metà)
+    const levelsPerColumn = Math.ceil(impactLevels.length / 2);
+    
+    // Prima colonna
+    for (let i = 0; i < levelsPerColumn; i++) {
+        if (i >= impactLevels.length) break;
+        
+        const level = impactLevels[i];
+        const yPos = startY + (i * levelSpacing);
+        const isHovered = (state.hoveredImpactLevel === level);
+        
+        // CERCHIETTO COLORATO
+        if (isHovered) {
+            fill(CONFIG.colors.accent);
+            noStroke();
+        } else {
+            fill(CONFIG.colors.infoBoxText);
+            noStroke();
+        }
+        circle(boxX + 20, yPos, 8);
+        
+        // TESTO
+        fill(isHovered ? CONFIG.colors.accent : CONFIG.colors.infoBoxText);
+        textSize(12);
+        text(`Impact ${level}`, boxX + 40, yPos + 3);
+    }
+    
+    // Seconda colonna
+    for (let i = levelsPerColumn; i < impactLevels.length; i++) {
+        const level = impactLevels[i];
+        const yPos = startY + ((i - levelsPerColumn) * levelSpacing);
+        const isHovered = (state.hoveredImpactLevel === level);
+        
+        // CERCHIETTO COLORATO
+        if (isHovered) {
+            fill(CONFIG.colors.accent);
+            noStroke();
+        } else {
+            fill(CONFIG.colors.infoBoxText);
+            noStroke();
+        }
+        circle(boxX + 20 + columnWidth, yPos, 8);
+        
+        // TESTO
+        fill(isHovered ? CONFIG.colors.accent : CONFIG.colors.infoBoxText);
+        textSize(12);
+        text(`Impact ${level}`, boxX + 40 + columnWidth, yPos + 3);
+    }
+}
+
 function drawInfoBox() {
     const boxX = width - CONFIG.layout.infoBoxWidth - CONFIG.layout.marginX;
-    const boxY = 60 + CONFIG.layout.topOffset;
+    const boxY = CONFIG.layout.volcanoInfoBoxY;
     const boxW = CONFIG.layout.infoBoxWidth;
     const boxH = CONFIG.layout.infoBoxHeight;
     
@@ -396,7 +505,7 @@ function drawInfoBox() {
     } else {
         fill(CONFIG.colors.infoBoxText);
         noStroke();
-        textSize(16);
+        textSize(14);
         textFont('Helvetica');
         textAlign(LEFT, TOP);
         text('HOVER A VOLCANO', boxX + 20, boxY + 20);
@@ -410,13 +519,11 @@ function drawVolcanoInfo(boxX, boxY) {
     textFont('Helvetica');
     textAlign(LEFT, TOP);
     
-    // Nome del vulcano in BOLD
     textSize(18);
     textStyle(BOLD);
     text(v.name.toUpperCase(), boxX + 20, boxY + 20);
     textStyle(NORMAL);
     
-    // Paese e ultima eruzione
     textSize(14);
     text(v.country.toUpperCase() + ' • LAST ERUPTION: ' + formatYearShort(v.year).toUpperCase(), 
          boxX + 20, boxY + 50);
@@ -544,7 +651,7 @@ function drawSelectedYearCount() {
         const eruptionsCount = state.filteredData.filter(v => v.year === state.timelineYear).length;
         if (eruptionsCount > 0) {
             const x = width - 120;
-            const y = 60 + CONFIG.layout.infoBoxHeight + 20 + CONFIG.layout.topOffset;
+            const y = CONFIG.layout.volcanoInfoBoxY + CONFIG.layout.infoBoxHeight + 40;
             fill(CONFIG.colors.text);
             textSize(14);
             textFont('Helvetica');
@@ -635,20 +742,16 @@ function drawVolcanoes() {
 }
 
 function drawVolcanoGlow(volcano, x, y, isHighlighted, isHovered) {
-    // GLOW PIÙ GRANDE PER ENTRAMBI I CASI (HOVER E HIGHLIGHT)
     let glowSize, alpha;
     
     if (isHighlighted) {
-        // HIGHLIGHT (ANNI SPECIFICI): GLOW ANCORA PIÙ GRANDE
         glowSize = map(volcano.impact, 5, 15, 60, 90);
         alpha = map(volcano.impact, 5, 15, 70, 100);
     } else {
-        // HOVER NORMALE: GLOW GRANDE MA UN PO' PIÙ PICCOLO
         glowSize = map(volcano.impact, 5, 15, 50, 80);
         alpha = map(volcano.impact, 5, 15, 60, 90);
     }
 
-    // MANTENIAMO LO STESSO COLORE MA CON ALPHA PIÙ ALTA
     fill(255, 43, 0, alpha);
     noStroke();
     circle(x, y, glowSize);
@@ -656,17 +759,14 @@ function drawVolcanoGlow(volcano, x, y, isHighlighted, isHovered) {
 
 function drawVolcanoDot(x, y, isHighlighted, isHovered) {
     if (isHighlighted) {
-        // HIGHLIGHT (ANNI SPECIFICI): ROSSO PIÙ GRANDE (10px)
         fill(CONFIG.colors.highlightGlow);
         noStroke();
         circle(x, y, 10);
     } else if (isHovered) {
-        // HOVER: NERO PIÙ GRANDE (8px)
         fill(CONFIG.colors.text);
         noStroke();
         circle(x, y, 8);
     } else {
-        // NORMALE: NERO STANDARD
         fill(CONFIG.colors.text);
         noStroke();
         circle(x, y, 4);
@@ -703,7 +803,6 @@ function drawContinentBullet(x, y, continent) {
     const isHovered = (state.hoveredContinent === continent);
 
     if (isHovered) {
-        // HOVER CONTINENTI: CERCHIO NERO PIENO (14px)
         fill(CONFIG.colors.text);
         noStroke();
         circle(x - 30, y, 14);
@@ -724,26 +823,66 @@ function drawContinentLabel(x, y, continent) {
     text(continent, x - 10, y);
 }
 
+// ===== HOVER LEGENDA =====
+function checkLegendHover() {
+    state.hoveredImpactLevel = null;
+    
+    const boxX = width - CONFIG.layout.infoBoxWidth - CONFIG.layout.marginX;
+    const boxY = CONFIG.layout.legendBoxY;
+    const startY = boxY + 95;
+    const levelSpacing = 25;
+    const columnWidth = (CONFIG.layout.infoBoxWidth - 40) / 2;
+    const levelsPerColumn = Math.ceil(impactLevels.length / 2);
+    
+    // Controlla se il mouse è sopra l'area della legenda
+    if (mouseX > boxX && mouseX < boxX + CONFIG.layout.infoBoxWidth &&
+        mouseY > startY && mouseY < startY + (levelsPerColumn * levelSpacing)) {
+        
+        // Prima colonna
+        if (mouseX < boxX + columnWidth) {
+            const levelIndex = Math.floor((mouseY - startY) / levelSpacing);
+            if (levelIndex >= 0 && levelIndex < levelsPerColumn && levelIndex < impactLevels.length) {
+                state.hoveredImpactLevel = impactLevels[levelIndex];
+            }
+        }
+        // Seconda colonna
+        else {
+            const levelIndex = Math.floor((mouseY - startY) / levelSpacing);
+            const actualIndex = levelIndex + levelsPerColumn;
+            if (levelIndex >= 0 && actualIndex < impactLevels.length) {
+                state.hoveredImpactLevel = impactLevels[actualIndex];
+            }
+        }
+    }
+}
+
 // ===== INTERAZIONI =====
 function checkHover() {
     if (state.filteredData.length === 0) {
         state.hoveredVolcano = null;
-        return;
+    } else {
+        let newHovered = null;
+        let minDist = Infinity;
+        
+        state.filteredData.forEach(v => {
+            const angles = state.continentAngles[v.continent];
+            if (!angles) return;
+
+            const key = `${v.name}-${v.year}-${v.deaths}`;
+            const angle = state.volcanoPositions.get(key) || angles.mid;
+            const r = getRadiusForImpact(v.impact);
+            const x = state.centerX + cos(angle) * r;
+            const y = state.centerY + sin(angle) * r;
+
+            const d = dist(mouseX, mouseY, x, y);
+            if (d < 15 && d < minDist) {
+                minDist = d;
+                newHovered = v;
+            }
+        });
+        
+        state.hoveredVolcano = newHovered;
     }
-
-    state.hoveredVolcano = state.filteredData.find(v => {
-        const angles = state.continentAngles[v.continent];
-        if (!angles) return false;
-
-        const key = `${v.name}-${v.year}-${v.deaths}`;
-        const angle = state.volcanoPositions.get(key) || angles.mid;
-        const r = getRadiusForImpact(v.impact);
-        const x = state.centerX + cos(angle) * r;
-        const y = state.centerY + sin(angle) * r;
-
-        // AREA DI HOVER AUMENTATA - 15px invece di 8px
-        return dist(mouseX, mouseY, x, y) < 15;
-    }) || null;
 }
 
 function checkContinentHover() {
@@ -767,7 +906,6 @@ function checkContinentHover() {
         const x = state.centerX + cos(angle) * r;
         const y = state.centerY + sin(angle) * r;
 
-        // AREA DI HOVER AUMENTATA - 25px invece di 20px
         const hoverThreshold = (cont === 'Europa' || cont === 'Asia') ? 25 : 30;
         
         if (dist(mouseX, mouseY, x - 30, y) < hoverThreshold) {
@@ -811,15 +949,12 @@ function mousePressed() {
         
         if (mouseX > playBtn.x && mouseX < playBtn.x + playBtn.width &&
             mouseY > playBtn.y && mouseY < playBtn.y + playBtn.height) {
-            // Attiva/disattiva l'animazione
             state.isPlaying = !state.isPlaying;
             
-            // Se stiamo partendo con l'animazione, resetta i timer
             if (state.isPlaying) {
                 state.animationTimer = 0;
                 state.isPausedBetweenCycles = false;
                 
-                // Se non c'è un anno corrente, inizia dal primo
                 const years = getEruptionYears();
                 if (years.length > 0 && state.timelineYear === null) {
                     state.currentYearIndex = 0;
@@ -838,7 +973,6 @@ function mousePressed() {
                 } else {
                     state.currentYearIndex = Math.max(0, state.currentYearIndex - 1);
                 }
-                // Ferma l'animazione se stava andando
                 state.isPlaying = false;
                 updateTimelineYear();
             }
@@ -854,7 +988,6 @@ function mousePressed() {
                 } else {
                     state.currentYearIndex = Math.min(years.length - 1, state.currentYearIndex + 1);
                 }
-                // Ferma l'animazione se stava andando
                 state.isPlaying = false;
                 updateTimelineYear();
             }
@@ -867,7 +1000,6 @@ function applyTemporalFilter() {
     const century = CONFIG.centuries[state.currentCenturiesIndex];
     state.selectedCentury = century.value;
     applyFilters();
-    // Ferma l'animazione quando si cambia filtro
     state.isPlaying = false;
 }
 
