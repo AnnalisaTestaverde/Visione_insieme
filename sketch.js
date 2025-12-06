@@ -15,24 +15,30 @@ const CONFIG = {
         selectedContinent: '#b9b9b988'
     },
     layout: {
-        centerXRatio: 0.5,
-        maxRadius: 342,
+        centerXRatio: 0.75,
+        maxRadius: 420,
         minRadius: 31.5,
         continentLabelOffset: 70,
         europeAsiaOffset: 45,
-        infoBoxWidth: 350,
-        infoBoxHeight: 120,
+        infoBoxWidth: 200,
+        infoBoxHeight: 80,
         bottomControlY: 100,
         marginX: 60,
         fontSizeControls: 48,
-        centerYOffset: 54,
+        centerYOffset: 40,
         topOffset: -20,
-        // NUOVA PROPRIETÀ PER POSIZIONARE LA LEGENDA
-        legendBoxY: 60,
-        // AUMENTATA L'ALTEZZA DELLA LEGENDA
-        legendBoxHeight: 300,
-        // POSIZIONE DELLA INFOBOX DEL VULCANO (più in basso)
-        volcanoInfoBoxY: 380
+        leftPanelWidth: 300,
+        controlButtonHeight: 50,
+        controlButtonWidth: 50,
+        // NUOVE DIMENSIONI PER I TESTI
+        timeframeFontSize: 36,   // Più grande, appena più piccolo del titolo (96)
+        yearFontSize: 36,        // Più grande, appena più piccolo del titolo (96)
+        labelFontSize: 20,
+        // POSIZIONI MODIFICATE (spostate verso il basso)
+        titleStartY: 60,
+        buttonStartY: 320,      // MODIFICATO: spostato più in basso
+        timeframeStartY: 420,   // MODIFICATO: spostato più in basso
+        yearStartY: 520         // MODIFICATO: spostato più in basso
     },
     centuries: [
         { label: 'all centuries', value: null },
@@ -56,6 +62,11 @@ let allImpacts = [];
 
 const CONCENTRIC_YEARS = [-4200, -3200, -2200, -1200, -200, 800, 1800, 1850, 1900, 1950, 2000, 2050];
 
+// Costanti per l'animazione
+const SELECTION_ANIMATION_DURATION = 500; // ms
+const HOVER_ANIMATION_DURATION = 300; // ms
+const CIRCLE_REVEAL_DURATION = 1500; // MODIFICATO: aumentato da 800ms a 1500ms per animazione più lenta
+
 // ===== STATO APPLICAZIONE =====
 let state = {
     volcanoData: [],
@@ -63,7 +74,6 @@ let state = {
     selectedCentury: null,
     selectedContinent: null,
     hoveredVolcano: null,
-    hoveredContinent: null,
     timelineYear: null,
     centerX: 0,
     centerY: 0,
@@ -73,7 +83,6 @@ let state = {
     globalYearRange: { min: 0, max: 0 },
     timelineButtons: [],
     currentCenturiesIndex: 0,
-    currentYearIndex: 0,
     isPlaying: false,
     leftControlAreas: null,
     rightControlAreas: null,
@@ -83,8 +92,25 @@ let state = {
     animationSpeed: 200,
     pauseBetweenCycles: 1000,
     isPausedBetweenCycles: false,
-    // NUOVA VARIABILE PER HOVER LEGENDA
-    hoveredImpactLevel: null
+    // VARIABILI PER I NUOVI CONTROLLI
+    startButtonArea: null,
+    timeFrameLeftArrows: null,
+    timeFrameRightArrows: null,
+    yearLeftArrow: null,
+    yearRightArrow: null,
+    // NUOVO: gestione dinamica degli anni
+    availableYears: [],
+    currentYearIndex: 0,
+    // NUOVO: variabile per mostrare l'anno nel selettore senza attivare l'evidenziazione
+    displayedYear: null,
+    // NUOVO: flag per tracciare se l'anno è stato attivato dall'utente
+    yearActivatedByUser: false,
+    // NUOVO: mappe per le animazioni
+    selectionAnimationStart: new Map(),
+    hoverAnimationStart: new Map(),
+    // NUOVO: animazione per i cerchi rossi
+    circleRevealStart: null,
+    circleRevealProgress: 0
 };
 
 // Variabile per l'immagine di sfondo radiale
@@ -121,11 +147,13 @@ const CONTINENT_MAP = {
 
 const CONTINENTS = ['Asia', 'Americhe', 'Europa', 'Oceania', 'Africa'];
 
+// FUNZIONE: Carica i dati CSV e l'immagine di sfondo
 function preload() {
     loadTable('assets/data_impatto.csv', 'csv', 'header', processTableData);
     radialBgImage = loadImage('assets/radial_bg.png');
 }
 
+// FUNZIONE: Processa i dati della tabella CSV e inizializza i dati dei vulcani
 function processTableData(table) {
     state.volcanoData = [];
     allImpacts = [];
@@ -165,26 +193,33 @@ function processTableData(table) {
     initializeData();
 }
 
+// FUNZIONE: Inizializza i dati dopo il caricamento
 function initializeData() {
     state.filteredData = [...state.volcanoData];
     state.globalYearRange = getGlobalYearRange();
     calculateContinentData();
     calculateVolcanoPositions();
     calculateTimelineButtons();
+    updateAvailableYears(); // Inizializza gli anni disponibili
+    
+    // Inizia l'animazione di apertura dei cerchi
+    state.circleRevealStart = millis();
 }
 
+// FUNZIONE: Setup iniziale di p5.js
 function setup() {
     createCanvas(windowWidth, windowHeight);
     updateLayout();
 }
 
+// FUNZIONE: Aggiorna il layout quando la finestra cambia dimensione
 function updateLayout() {
     state.centerX = width * CONFIG.layout.centerXRatio;
     state.centerY = height / 2 + CONFIG.layout.centerYOffset;
     calculateTimelineButtons();
 }
 
-// ===== CALCOLI =====
+// FUNZIONE: Calcola la distribuzione angolare dei continenti
 function calculateContinentData() {
     state.continentCounts = CONTINENTS.reduce((acc, cont) => {
         acc[cont] = 0;
@@ -215,6 +250,7 @@ function calculateContinentData() {
     });
 }
 
+// FUNZIONE: Calcola le posizioni angolari casuali dei vulcani
 function calculateVolcanoPositions() {
     state.volcanoPositions.clear();
     
@@ -227,6 +263,52 @@ function calculateVolcanoPositions() {
     });
 }
 
+// NUOVA FUNZIONE: Aggiorna gli anni disponibili in base al periodo selezionato
+function updateAvailableYears() {
+    if (state.selectedCentury === null) {
+        // Se nessun periodo selezionato, mostra tutti gli anni unici
+        state.availableYears = [...new Set(state.volcanoData.map(v => v.year))].sort((a, b) => a - b);
+    } else {
+        // Se periodo selezionato, mostra solo gli anni in quel periodo
+        const centuryIndex = CONCENTRIC_YEARS.indexOf(state.selectedCentury);
+        if (centuryIndex !== -1 && centuryIndex < CONCENTRIC_YEARS.length - 1) {
+            const startYear = CONCENTRIC_YEARS[centuryIndex];
+            const endYear = CONCENTRIC_YEARS[centuryIndex + 1];
+            
+            const filteredYears = state.volcanoData
+                .filter(v => {
+                    if (centuryIndex === CONCENTRIC_YEARS.length - 2) {
+                        return v.year >= startYear && v.year <= endYear;
+                    } else {
+                        return v.year >= startYear && v.year < endYear;
+                    }
+                })
+                .map(v => v.year);
+            
+            state.availableYears = [...new Set(filteredYears)].sort((a, b) => a - b);
+        } else {
+            state.availableYears = [];
+        }
+    }
+    
+    // Quando cambiamo periodo, resettiamo l'evidenziazione
+    // Ma manteniamo l'anno da mostrare nel selettore (il primo disponibile)
+    state.timelineYear = null; // RIMOSSO: non evidenziazione automatica
+    state.displayedYear = state.availableYears.length > 0 ? state.availableYears[0] : null;
+    state.currentYearIndex = 0;
+    state.yearActivatedByUser = false; // Resetta il flag
+    
+    // Ferma l'animazione quando si cambia periodo
+    state.isPlaying = false;
+    state.animationTimer = 0;
+    state.isPausedBetweenCycles = false;
+    
+    // Resetta le animazioni dei vulcani
+    state.selectionAnimationStart.clear();
+    state.hoverAnimationStart.clear();
+}
+
+// FUNZIONE: Calcola il raggio in base al livello di impatto
 function getRadiusForImpact(impact) {
     if (impactLevels.length <= 1) return CONFIG.layout.minRadius;
     
@@ -236,33 +318,83 @@ function getRadiusForImpact(impact) {
     const totalLevels = impactLevels.length;
     const normalized = idx / (totalLevels - 1);
     
-    // MANTENIAMO LA CORRISPONDENZA ORIGINALE: impatto 1 (più esterno) → maxRadius, impatto 16 (più interno) → minRadius
-    // Questo è già corretto nel codice esistente
     return map(normalized, 0, 1, CONFIG.layout.maxRadius, CONFIG.layout.minRadius);
 }
 
+// FUNZIONE: Disegna i cerchi concentrici dei livelli di impatto
 function drawImpactCircles() {
+    // Indici speciali: 0, 4, 8, 12 (corrispondenti ai cerchi 1, 5, 9, 13 partendo dall'esterno)
+    // NOTA: il cerchio 16 (indice 15) NON è incluso
+    const specialIndices = [0, 4, 8, 12].filter(index => index < impactLevels.length);
+    
+    // Aggiorna l'animazione di apertura dei cerchi
+    if (state.circleRevealStart !== null) {
+        const elapsed = millis() - state.circleRevealStart;
+        state.circleRevealProgress = constrain(elapsed / CIRCLE_REVEAL_DURATION, 0, 1);
+        
+        if (state.circleRevealProgress >= 1) {
+            state.circleRevealStart = null;
+        }
+    }
+    
     for (let i = 0; i < impactLevels.length; i++) {
-        // CALCOLA IL RAGGIO: dalla più interna (impatti alti) alla più esterna (impatti bassi)
-        // i=0 → impactLevels[0] (impatto più basso, es: 1) → raggio più GRANDE (esterno)
-        // i=ultimo → impactLevels[ultimo] (impatto più alto, es: 16) → raggio più PICCOLO (interno)
         let radius = map(i, 0, impactLevels.length - 1, 
                         CONFIG.layout.maxRadius, CONFIG.layout.minRadius);
         noFill();
         
-        // MODIFICATO: HOVER IN NERO
-        if (state.hoveredImpactLevel === impactLevels[i]) {
-            stroke(0); // NERO invece di CONFIG.colors.accent
-            strokeWeight(3);
+        // Determina se è un cerchio speciale
+        const isSpecial = specialIndices.includes(i);
+        
+        if (isSpecial) {
+            // Animazione di apertura per i cerchi speciali
+            let animatedRadius = radius;
+            let animatedStrokeWeight = 2;
+            let animatedAlpha = 255;
+            
+            if (state.circleRevealProgress < 1) {
+                // Calcola progresso per questo cerchio (i cerchi si aprono dall'interno verso l'esterno)
+                const circleProgress = constrain((state.circleRevealProgress * impactLevels.length - i) / 4, 0, 1);
+                animatedRadius = radius * circleProgress;
+                animatedStrokeWeight = 2 * circleProgress;
+                animatedAlpha = 255 * circleProgress;
+            }
+            
+            stroke(255, 43, 0, animatedAlpha); // rosso con animazione alpha
+            strokeWeight(animatedStrokeWeight); // più spesso con animazione
+            ellipse(0, 0, animatedRadius * 2);
+            
+            // Se l'animazione è completa, aggiungi etichetta
+            if (state.circleRevealProgress >= 1) {
+                // Il numero del cerchio partendo da 1
+                const circleNumber = i + 1;
+                // Calcola il punto sull'asse Y (in alto)
+                const labelX = 0;
+                const labelY = -radius - 15; // 15 pixel sopra il cerchio
+                
+                push();
+                fill(CONFIG.colors.accent);
+                noStroke();
+                textSize(14);
+                textAlign(CENTER, CENTER);
+                text(circleNumber, labelX, labelY);
+                pop();
+            }
         } else {
+            // Cerchi normali con animazione
+            let animatedRadius = radius;
+            if (state.circleRevealProgress < 1) {
+                const circleProgress = constrain((state.circleRevealProgress * impactLevels.length - i) / 4, 0, 1);
+                animatedRadius = radius * circleProgress;
+            }
+            
             stroke(CONFIG.colors.circle);
             strokeWeight(0.5);
+            ellipse(0, 0, animatedRadius * 2);
         }
-        
-        ellipse(0, 0, radius * 2);
     }
 }
 
+// FUNZIONE: Calcola le posizioni dei bottoni della timeline
 function calculateTimelineButtons() {
     state.timelineButtons = [];
     const tlY = height - CONFIG.layout.bottomControlY;
@@ -292,6 +424,7 @@ function calculateTimelineButtons() {
     });
 }
 
+// FUNZIONE: Applica i filtri in base al secolo e continente selezionati
 function applyFilters() {
     state.filteredData = state.volcanoData.filter(v => {
         let centuryMatch = true;
@@ -318,9 +451,10 @@ function applyFilters() {
     });
 
     calculateContinentData();
-    state.timelineYear = null;
+    updateAvailableYears(); // Aggiorna gli anni disponibili dopo il filtro
 }
 
+// FUNZIONE: Ottiene il range globale di anni dai dati
 function getGlobalYearRange() {
     const years = state.volcanoData.map(v => v.year);
     return {
@@ -329,32 +463,35 @@ function getGlobalYearRange() {
     };
 }
 
-// ===== ANIMAZIONE =====
+// FUNZIONE: Gestisce l'animazione della timeline
 function updateAnimation() {
-    if (!state.isPlaying) return;
+    if (!state.isPlaying || state.availableYears.length === 0) return;
     
-    const years = getEruptionYears();
-    if (years.length === 0) return;
+    // Se l'anno non è stato attivato dall'utente, lo attiviamo ora
+    if (!state.yearActivatedByUser) {
+        state.yearActivatedByUser = true;
+        state.timelineYear = state.availableYears[state.currentYearIndex];
+        // Resetta le animazioni di selezione
+        state.selectionAnimationStart.clear();
+    }
     
-    // Controlla se siamo in pausa tra i cicli
     if (state.isPausedBetweenCycles) {
         state.animationTimer += deltaTime;
         if (state.animationTimer >= state.pauseBetweenCycles) {
             state.animationTimer = 0;
             state.isPausedBetweenCycles = false;
             state.currentYearIndex = 0;
+            state.timelineYear = state.availableYears[0];
         }
         return;
     }
     
-    // Avanza l'animazione
     state.animationTimer += deltaTime;
     
-    // Controlla se è il momento di passare all'anno successivo
     if (state.animationTimer >= state.animationSpeed) {
         state.animationTimer = 0;
         
-        if (state.currentYearIndex < years.length - 1) {
+        if (state.currentYearIndex < state.availableYears.length - 1) {
             state.currentYearIndex++;
         } else {
             state.isPausedBetweenCycles = true;
@@ -362,305 +499,273 @@ function updateAnimation() {
         }
     }
     
-    // Aggiorna l'anno corrente per la visualizzazione
-    state.timelineYear = years[state.currentYearIndex];
+    state.timelineYear = state.availableYears[state.currentYearIndex];
 }
 
-// ===== FUNZIONI DI DISEGNO =====
+// FUNZIONE: Loop principale di disegno
 function draw() {
     background(CONFIG.colors.background);
     updateLayout();
     
-    // Aggiorna l'animazione
     updateAnimation();
     
     drawTitle();
-    drawLegendBox();
-    drawInfoBox();
+    drawStartAnimationButton();
     drawMainCircle();
     drawContinentLabels();
     drawTemporalRangeSelector();
     drawYearSelector();
-    drawSelectedYearCount();
+    drawInfobox();
     
-    // Controlla hover della legenda
-    checkLegendHover();
+    checkHover();
 }
 
+// FUNZIONE: Disegna il titolo principale (su tre righe a sinistra)
 function drawTitle() {
     textSize(96);
     textFont('Helvetica');
     textStyle(BOLD);
     textAlign(LEFT, TOP);
     
-    const titleY = 60 + CONFIG.layout.topOffset;
+    const titleY = CONFIG.layout.titleStartY + CONFIG.layout.topOffset;
     
     fill(CONFIG.colors.text);
-    text('SIGNIFICANT VOLCANIC', CONFIG.layout.marginX, titleY);
+    text('SIGNIFICANT', CONFIG.layout.marginX, titleY);
+
+     fill(CONFIG.colors.text);
+    text('VOLCANIC', CONFIG.layout.marginX, titleY + 90);
+     
     
     fill(CONFIG.colors.accent);
-    text('ERUPTION', CONFIG.layout.marginX, titleY + 100);
+    text('ERUPTIONS', CONFIG.layout.marginX, titleY + 180);
     
     textStyle(NORMAL);
 }
 
-function drawLegendBox() {
-    const boxX = width - CONFIG.layout.infoBoxWidth - CONFIG.layout.marginX;
-    const boxY = CONFIG.layout.legendBoxY;
-    const boxW = CONFIG.layout.infoBoxWidth;
-    const boxH = CONFIG.layout.legendBoxHeight;
-    
-    // BOX BIANCO CON BORDO NERO
-    fill(CONFIG.colors.infoBox);
-    stroke(CONFIG.colors.infoBoxStroke);
+// FUNZIONE: Disegna il pulsante Start Animation
+function drawStartAnimationButton() {
+    const buttonX = CONFIG.layout.marginX;
+    const buttonY = CONFIG.layout.buttonStartY;
+    const buttonWidth = 200;
+    const buttonHeight = CONFIG.layout.controlButtonHeight;
+
+    // Disegna il bordo rosso fine
+    stroke(CONFIG.colors.accent);
     strokeWeight(1);
-    rect(boxX, boxY, boxW, boxH, 10, 10, 10, 10);
-    
-    fill(CONFIG.colors.infoBoxText);
+    noFill();
+    rect(buttonX, buttonY, buttonWidth, buttonHeight, 5);
+
+    // Disegna il triangolino play
+    fill(CONFIG.colors.accent);
     noStroke();
-    textFont('Helvetica');
-    textAlign(LEFT, TOP);
-    
-    // TITOLO LEGENDA
-    textSize(18);
-    textStyle(BOLD);
-    text('IMPACT LEVELS', boxX + 20, boxY + 20);
-    textStyle(NORMAL);
-    
-    // DESCRIZIONE
+    triangle(
+        buttonX + 15, buttonY + 15,
+        buttonX + 15, buttonY + 35,
+        buttonX + 35, buttonY + 25
+    );
+
+    // Disegna il testo
+    fill(CONFIG.colors.text);
+    noStroke();
     textSize(14);
-    text('Hover over impact levels to highlight', 
-         boxX + 20, boxY + 50);
-    text('corresponding circles', 
-         boxX + 20, boxY + 70);
-    
-    // LISTA DEI LIVELLI DI IMPATTO DIVISI IN DUE COLONNE
-    const startY = boxY + 95;
-    const levelSpacing = 25;
-    const columnWidth = (boxW - 40) / 2;
-    
-    // Calcola quanti livelli per colonna (circa metà)
-    const levelsPerColumn = Math.ceil(impactLevels.length / 2);
-    
-    // Prima colonna
-    for (let i = 0; i < levelsPerColumn; i++) {
-        if (i >= impactLevels.length) break;
-        
-        const level = impactLevels[i];
-        const yPos = startY + (i * levelSpacing);
-        const isHovered = (state.hoveredImpactLevel === level);
-        
-        // CERCHIETTO COLORATO
-        if (isHovered) {
-            fill(CONFIG.colors.accent);
-            noStroke();
-        } else {
-            fill(CONFIG.colors.infoBoxText);
-            noStroke();
-        }
-        circle(boxX + 20, yPos, 8);
-        
-        // TESTO
-        fill(isHovered ? CONFIG.colors.accent : CONFIG.colors.infoBoxText);
-        textSize(12);
-        text(`Impact ${level}`, boxX + 40, yPos + 3);
-    }
-    
-    // Seconda colonna
-    for (let i = levelsPerColumn; i < impactLevels.length; i++) {
-        const level = impactLevels[i];
-        const yPos = startY + ((i - levelsPerColumn) * levelSpacing);
-        const isHovered = (state.hoveredImpactLevel === level);
-        
-        // CERCHIETTO COLORATO
-        if (isHovered) {
-            fill(CONFIG.colors.accent);
-            noStroke();
-        } else {
-            fill(CONFIG.colors.infoBoxText);
-            noStroke();
-        }
-        circle(boxX + 20 + columnWidth, yPos, 8);
-        
-        // TESTO
-        fill(isHovered ? CONFIG.colors.accent : CONFIG.colors.infoBoxText);
-        textSize(12);
-        text(`Impact ${level}`, boxX + 40 + columnWidth, yPos + 3);
-    }
+    textAlign(LEFT, CENTER);
+    text('Start Animation', buttonX + 50, buttonY + 25);
+
+    // Memorizza l'area del pulsante per il click
+    state.startButtonArea = {
+        x: buttonX,
+        y: buttonY,
+        width: buttonWidth,
+        height: buttonHeight
+    };
 }
 
-function drawInfoBox() {
-    const boxX = width - CONFIG.layout.infoBoxWidth - CONFIG.layout.marginX;
-    const boxY = CONFIG.layout.volcanoInfoBoxY;
-    const boxW = CONFIG.layout.infoBoxWidth;
-    const boxH = CONFIG.layout.infoBoxHeight;
+// FUNZIONE: Disegna il selettore del time frame
+function drawTemporalRangeSelector() {
+    const startX = CONFIG.layout.marginX;
+    const startY = CONFIG.layout.timeframeStartY; // MODIFICATO: posizione più in basso
+    const labelY = startY;
+    const controlsY = startY + 40;
+
+    // Etichetta "select time frame:"
+    fill(CONFIG.colors.text);
+    noStroke();
+    textSize(CONFIG.layout.labelFontSize);
+    textAlign(LEFT, TOP);
+    text('Select time frame:', startX, labelY);
+
+    // Calcola gli anni del periodo selezionato
+    let yearString;
     
-    fill(CONFIG.colors.infoBox);
-    stroke(CONFIG.colors.infoBoxStroke);
-    strokeWeight(1);
-    rect(boxX, boxY, boxW, boxH, 10, 10, 10, 10);
-    
-    if (state.hoveredVolcano) {
-        drawVolcanoInfo(boxX, boxY);
+    if (state.selectedCentury === null) {
+        yearString = 'all centuries';
     } else {
+        const index = CONCENTRIC_YEARS.indexOf(state.selectedCentury);
+        if (index !== -1 && index < CONCENTRIC_YEARS.length - 1) {
+            const startYear = formatYearShort(CONCENTRIC_YEARS[index]);
+            const endYear = formatYearShort(CONCENTRIC_YEARS[index + 1]);
+            yearString = startYear + ' - ' + endYear;
+        } else {
+            yearString = 'all centuries';
+        }
+    }
+
+    // MODIFICATO: aumentata la distanza tra le frecce e il testo centrale
+    // Disegna le due frecce a sinistra con quadratino (NERO)
+    const leftArrowsX = startX;
+    const leftArrowsY = controlsY;
+    drawDoubleArrowWithBox(leftArrowsX, leftArrowsY, 60, 40, '<<', CONFIG.colors.text, true); // true = nero
+
+    // Disegna gli anni al centro con più spazio
+    const yearX = leftArrowsX + 80; // MODIFICATO: aumentato da 70 a 80
+    fill(CONFIG.colors.text); // Nero
+    textSize(CONFIG.layout.timeframeFontSize); // MODIFICATO: dimensione più grande
+    textAlign(CENTER, CENTER);
+    text(yearString, yearX + 140, leftArrowsY + 20); // MODIFICATO: aumentato lo spazio
+
+    // Disegna le due frecce a destra con quadratino (NERO)
+    const rightArrowsX = yearX + 280; // MODIFICATO: aumentato da 240 a 280
+    drawDoubleArrowWithBox(rightArrowsX, leftArrowsY, 60, 40, '>>', CONFIG.colors.text, true); // true = nero
+
+    // Memorizza le aree per il click (aggiornate per le nuove dimensioni)
+    state.timeFrameLeftArrows = {
+        x: leftArrowsX,
+        y: leftArrowsY,
+        width: 60,
+        height: 40
+    };
+    state.timeFrameRightArrows = {
+        x: rightArrowsX,
+        y: leftArrowsY,
+        width: 60,
+        height: 40
+    };
+}
+
+// FUNZIONE: Disegna il selettore dell'anno
+function drawYearSelector() {
+    const startX = CONFIG.layout.marginX;
+    const startY = CONFIG.layout.yearStartY; // MODIFICATO: posizione più in basso
+    const labelY = startY;
+    const controlsY = startY + 40;
+
+    // Etichetta "select year:" in ROSSO
+    fill(CONFIG.colors.accent); // ROSSO
+    noStroke();
+    textSize(CONFIG.layout.labelFontSize);
+    textAlign(LEFT, TOP);
+    text('Select year:', startX, labelY);
+
+    // MODIFICATO: aumentata la distanza tra le frecce e il testo centrale
+    // Freccia sinistra con quadratino (ROSSO)
+    const leftArrowX = startX;
+    const leftArrowY = controlsY;
+    drawSingleArrowWithBox(leftArrowX, leftArrowY, 50, 40, '<', CONFIG.colors.accent, false); // false = rosso
+
+    // Anno da mostrare (displayedYear, non timelineYear)
+    const yearX = leftArrowX + 70; // MODIFICATO: aumentato da 60 a 70
+    
+    let yearText;
+    if (state.displayedYear !== null) {
+        yearText = formatYear(state.displayedYear);
+    } else if (state.availableYears.length > 0) {
+        // Mostra l'anno più vecchio disponibile
+        yearText = formatYear(state.availableYears[0]);
+    } else {
+        yearText = 'No data';
+    }
+    
+    // Anno sempre in ROSSO
+    fill(CONFIG.colors.accent); // SEMPRE ROSSO
+    textSize(CONFIG.layout.yearFontSize); // MODIFICATO: dimensione più grande
+    textAlign(CENTER, CENTER);
+    text(yearText, yearX + 120, leftArrowY + 20); // MODIFICATO: aggiustata la posizione
+
+    // Freccia destra con quadratino (ROSSO)
+    const rightArrowX = yearX + 240; // MODIFICATO: aumentato da 200 a 240
+    drawSingleArrowWithBox(rightArrowX, leftArrowY, 50, 40, '>', CONFIG.colors.accent, false); // false = rosso
+
+    // Memorizza le aree per il click
+    state.yearLeftArrow = {
+        x: leftArrowX,
+        y: leftArrowY,
+        width: 50,
+        height: 40
+    };
+    state.yearRightArrow = {
+        x: rightArrowX,
+        y: leftArrowY,
+        width: 50,
+        height: 40
+    };
+}
+
+// NUOVA FUNZIONE: Disegna doppia freccia con quadratino (per secoli)
+function drawDoubleArrowWithBox(x, y, w, h, arrows, arrowColor, isBlack) {
+    // Disegna il quadratino bianco con bordo
+    fill(255);
+    stroke(isBlack ? CONFIG.colors.text : CONFIG.colors.accent); // MODIFICATO: nero per secoli, rosso per anni
+    strokeWeight(1);
+    rect(x, y, w, h, 5);
+    
+    // Disegna le frecce
+    fill(arrowColor);
+    noStroke();
+    textSize(24);
+    textAlign(CENTER, CENTER);
+    text(arrows, x + w/2, y + h/2);
+}
+
+// NUOVA FUNZIONE: Disegna singola freccia con quadratino (per anni)
+function drawSingleArrowWithBox(x, y, w, h, arrow, arrowColor, isBlack) {
+    // Disegna il quadratino bianco con bordo
+    fill(255);
+    stroke(isBlack ? CONFIG.colors.text : CONFIG.colors.accent); // MODIFICATO: nero per secoli, rosso per anni
+    strokeWeight(1);
+    rect(x, y, w, h, 5);
+    
+    // Disegna la freccia
+    fill(arrowColor);
+    noStroke();
+    textSize(24);
+    textAlign(CENTER, CENTER);
+    text(arrow, x + w/2, y + h/2);
+}
+
+// FUNZIONE: Disegna l'infobox per il vulcano hovered
+function drawInfobox() {
+    if (state.hoveredVolcano) {
+        const volcano = state.hoveredVolcano;
+        const boxWidth = CONFIG.layout.infoBoxWidth;
+        const boxHeight = CONFIG.layout.infoBoxHeight;
+
+        // Posiziona il box vicino al mouse
+        let x = mouseX + 20;
+        let y = mouseY - boxHeight / 2;
+
+        // Evita che il box esca dallo schermo
+        if (x + boxWidth > width) x = mouseX - boxWidth - 20;
+        if (y < 0) y = 0;
+        if (y + boxHeight > height) y = height - boxHeight;
+
+        // Disegna il rettangolo bianco con bordo nero
+        fill(CONFIG.colors.infoBox);
+        stroke(CONFIG.colors.infoBoxStroke);
+        strokeWeight(1);
+        rect(x, y, boxWidth, boxHeight, 5);
+
+        // Testo
         fill(CONFIG.colors.infoBoxText);
         noStroke();
-        textSize(14);
-        textFont('Helvetica');
+        textSize(16);
         textAlign(LEFT, TOP);
-        text('HOVER A VOLCANO', boxX + 20, boxY + 20);
+        text(volcano.name, x + 10, y + 10);
+        textSize(14);
+        text('Year: ' + formatYear(volcano.year), x + 10, y + 40);
     }
 }
 
-function drawVolcanoInfo(boxX, boxY) {
-    const v = state.hoveredVolcano;
-    fill(CONFIG.colors.infoBoxText);
-    noStroke();
-    textFont('Helvetica');
-    textAlign(LEFT, TOP);
-    
-    textSize(18);
-    textStyle(BOLD);
-    text(v.name.toUpperCase(), boxX + 20, boxY + 20);
-    textStyle(NORMAL);
-    
-    textSize(14);
-    text(v.country.toUpperCase() + ' • LAST ERUPTION: ' + formatYearShort(v.year).toUpperCase(), 
-         boxX + 20, boxY + 50);
-}
-
-function drawTemporalRangeSelector() {
-    const fontSize = CONFIG.layout.fontSizeControls;
-    
-    const x = CONFIG.layout.marginX;
-    const y = state.asiaLabelY - 10;
-    
-    fill(CONFIG.colors.text);
-    noStroke();
-    textSize(fontSize);
-    textFont('Helvetica');
-    textStyle(BOLD);
-    textAlign(LEFT, CENTER);
-    
-    const current = CONFIG.centuries[state.currentCenturiesIndex];
-    let label = current.label.toUpperCase();
-    if (current.value === null) label = 'ALL CENTURIES';
-    
-    if (state.currentCenturiesIndex > 0) {
-        if (state.currentCenturiesIndex < CONFIG.centuries.length - 1) {
-            const nextLabel = CONFIG.centuries[state.currentCenturiesIndex + 1].label.toUpperCase();
-            label = label + '–' + nextLabel;
-        }
-        else if (state.currentCenturiesIndex === CONFIG.centuries.length - 1) {
-            label = '2000 AD–2050 AD';
-        }
-    }
-    
-    const fullText = `< ${label} >`;
-    text(fullText, x, y);
-    
-    const textWidthVal = textWidth(fullText);
-    
-    state.leftControlAreas = {
-        leftButton: {
-            x: x - 30,
-            y: y - fontSize/2,
-            width: textWidth('<') + 60,
-            height: fontSize + 10
-        },
-        rightButton: {
-            x: x + textWidthVal - textWidth('>') - 30,
-            y: y - fontSize/2,
-            width: textWidth('>') + 60,
-            height: fontSize + 10
-        }
-    };
-    
-    textStyle(NORMAL);
-}
-
-function drawYearSelector() {
-    const fontSize = CONFIG.layout.fontSizeControls;
-    
-    const x = width - CONFIG.layout.marginX;
-    const y = state.asiaLabelY - 10;
-    
-    fill(CONFIG.colors.text);
-    noStroke();
-    textSize(fontSize);
-    textFont('Helvetica');
-    textStyle(BOLD);
-    textAlign(RIGHT, CENTER);
-    
-    const years = getEruptionYears();
-    let yearLabel = '——';
-    if (years.length > 0) {
-        const idx = constrain(state.currentYearIndex, 0, years.length - 1);
-        yearLabel = formatYearShort(years[idx]).toUpperCase();
-    }
-    
-    const fullText = `< ${yearLabel} >`;
-    
-    const playPauseX = x - textWidth(fullText) - 70;
-    drawPlayPauseIcon(playPauseX, y);
-    
-    text(fullText, x, y);
-    
-    const textWidthVal = textWidth(fullText);
-    const textX = x - textWidthVal;
-    
-    state.rightControlAreas = {
-        playPause: {
-            x: playPauseX - 25,
-            y: y - 25,
-            width: 50,
-            height: 50
-        },
-        leftButton: {
-            x: textX - 30,
-            y: y - fontSize/2,
-            width: textWidth('<') + 60,
-            height: fontSize + 10
-        },
-        rightButton: {
-            x: textX + textWidthVal - textWidth('>') - 30,
-            y: y - fontSize/2,
-            width: textWidth('>') + 60,
-            height: fontSize + 10
-        }
-    };
-    
-    textStyle(NORMAL);
-}
-
-function drawPlayPauseIcon(x, y) {
-    if (!state.isPlaying) {
-        fill(CONFIG.colors.accent);
-        noStroke();
-        triangle(x - 15, y - 20, x + 15, y, x - 15, y + 20);
-    } else {
-        fill(CONFIG.colors.accent);
-        noStroke();
-        rect(x - 12, y - 22, 10, 44);
-        rect(x + 2, y - 22, 10, 44);
-    }
-}
-
-function drawSelectedYearCount() {
-    if (state.timelineYear !== null && state.filteredData.length > 0) {
-        const eruptionsCount = state.filteredData.filter(v => v.year === state.timelineYear).length;
-        if (eruptionsCount > 0) {
-            const x = width - 120;
-            const y = CONFIG.layout.volcanoInfoBoxY + CONFIG.layout.infoBoxHeight + 40;
-            fill(CONFIG.colors.text);
-            textSize(14);
-            textFont('Helvetica');
-            textAlign(RIGHT, TOP);
-            text(eruptionsCount + ' ERUPTIONS', x, y);
-        }
-    }
-}
-
+// FUNZIONE: Disegna il cerchio principale con tutti gli elementi
 function drawMainCircle() {
     push();
     translate(state.centerX, state.centerY);
@@ -674,36 +779,15 @@ function drawMainCircle() {
     
     drawImpactCircles();
     drawContinentDividers();
-    drawHoveredContinentSlice();
     
     if (state.filteredData.length > 0) {
         drawVolcanoes();
     }
     
     pop();
-    
-    if (state.filteredData.length > 0) {
-        checkHover();
-        checkContinentHover();
-    } else {
-        state.hoveredVolcano = null;
-        state.hoveredContinent = null;
-    }
 }
 
-function drawHoveredContinentSlice() {
-    if (state.hoveredContinent) {
-        const angles = state.continentAngles[state.hoveredContinent];
-        if (angles && angles.start !== angles.end) {
-            fill(CONFIG.colors.selectedContinent);
-            noStroke();
-            strokeWeight(0.5);
-            arc(0, 0, CONFIG.layout.maxRadius * 2, CONFIG.layout.maxRadius * 2, 
-                angles.start, angles.end, PIE);
-        }
-    }
-}
-
+// FUNZIONE: Disegna le linee divisorie tra i continenti
 function drawContinentDividers() {
     stroke(CONFIG.colors.circle);
     strokeWeight(1);
@@ -718,6 +802,7 @@ function drawContinentDividers() {
     });
 }
 
+// FUNZIONE: Disegna tutti i vulcani filtrati
 function drawVolcanoes() {
     state.filteredData.forEach(v => {
         let key = `${v.name}-${v.year}-${v.deaths}`;
@@ -731,25 +816,70 @@ function drawVolcanoes() {
         const x = cos(angle) * r;
         const y = sin(angle) * r;
 
-        const isHighlighted = (state.timelineYear !== null && v.year === state.timelineYear);
+        // MODIFICATO: ora l'evidenziazione avviene solo se timelineYear non è null
+        // E se l'anno è stato attivato dall'utente (yearActivatedByUser)
+        const isHighlighted = (state.timelineYear !== null && state.yearActivatedByUser && v.year === state.timelineYear);
         const isHovered = (state.hoveredVolcano === v);
 
-        if (isHighlighted || isHovered) {
-            drawVolcanoGlow(v, x, y, isHighlighted, isHovered);
+        // Gestione animazione selezione
+        if (isHighlighted) {
+            if (!state.selectionAnimationStart.has(key)) {
+                state.selectionAnimationStart.set(key, millis());
+            }
+        } else {
+            state.selectionAnimationStart.delete(key);
         }
+
+        // Gestione animazione hover
+        if (isHovered) {
+            if (!state.hoverAnimationStart.has(key)) {
+                state.hoverAnimationStart.set(key, millis());
+            }
+        } else {
+            state.hoverAnimationStart.delete(key);
+        }
+
+        // Calcolo progressi animazione
+        let selectionProgress = 0;
+        if (isHighlighted && state.selectionAnimationStart.has(key)) {
+            const startTime = state.selectionAnimationStart.get(key);
+            const elapsed = millis() - startTime;
+            selectionProgress = constrain(elapsed / SELECTION_ANIMATION_DURATION, 0, 1);
+        }
+
+        let hoverProgress = 0;
+        if (isHovered && state.hoverAnimationStart.has(key)) {
+            const startTime = state.hoverAnimationStart.get(key);
+            const elapsed = millis() - startTime;
+            hoverProgress = constrain(elapsed / HOVER_ANIMATION_DURATION, 0, 1);
+        }
+
+        // Disegna il bagliore se necessario
+        if (isHighlighted || isHovered) {
+            drawVolcanoGlow(v, x, y, isHighlighted, isHovered, selectionProgress, hoverProgress);
+        }
+        
+        // Disegna il punto del vulcano
         drawVolcanoDot(x, y, isHighlighted, isHovered);
     });
 }
 
-function drawVolcanoGlow(volcano, x, y, isHighlighted, isHovered) {
+// FUNZIONE: Disegna l'effetto glow per vulcani evidenziati o in hover (con animazione)
+function drawVolcanoGlow(volcano, x, y, isHighlighted, isHovered, selectionProgress, hoverProgress) {
     let glowSize, alpha;
     
     if (isHighlighted) {
-        glowSize = map(volcano.impact, 5, 15, 60, 90);
-        alpha = map(volcano.impact, 5, 15, 70, 100);
+        let baseSize = map(volcano.impact, 5, 15, 60, 90);
+        let baseAlpha = map(volcano.impact, 5, 15, 70, 100);
+        glowSize = selectionProgress * baseSize;
+        alpha = selectionProgress * baseAlpha;
+    } else if (isHovered) {
+        let baseSize = map(volcano.impact, 5, 15, 50, 80);
+        let baseAlpha = map(volcano.impact, 5, 15, 60, 90);
+        glowSize = hoverProgress * baseSize;
+        alpha = hoverProgress * baseAlpha;
     } else {
-        glowSize = map(volcano.impact, 5, 15, 50, 80);
-        alpha = map(volcano.impact, 5, 15, 60, 90);
+        return; // non dovrebbe succedere
     }
 
     fill(255, 43, 0, alpha);
@@ -757,6 +887,7 @@ function drawVolcanoGlow(volcano, x, y, isHighlighted, isHovered) {
     circle(x, y, glowSize);
 }
 
+// FUNZIONE: Disegna il punto del vulcano
 function drawVolcanoDot(x, y, isHighlighted, isHovered) {
     if (isHighlighted) {
         fill(CONFIG.colors.highlightGlow);
@@ -769,10 +900,11 @@ function drawVolcanoDot(x, y, isHighlighted, isHovered) {
     } else {
         fill(CONFIG.colors.text);
         noStroke();
-        circle(x, y, 4);
+        circle(x, y, 5);
     }
 }
 
+// FUNZIONE: Disegna le etichette dei continenti (SENZA cerchietto, posizione originale fuori dal cerchio)
 function drawContinentLabels() {
     CONTINENTS.forEach(cont => {
         const angles = state.continentAngles[cont];
@@ -780,6 +912,7 @@ function drawContinentLabels() {
 
         const angle = angles.mid;
         
+        // Posiziona il testo fuori dal cerchio (come nella versione originale)
         let r;
         if (cont === 'Europa' || cont === 'Asia') {
             r = CONFIG.layout.maxRadius + CONFIG.layout.europeAsiaOffset;
@@ -794,69 +927,16 @@ function drawContinentLabels() {
             state.asiaLabelY = y;
         }
 
-        drawContinentBullet(x, y, cont);
-        drawContinentLabel(x, y, cont);
+        // Nome continente (allineato a sinistra rispetto al punto)
+        fill(CONFIG.colors.text);
+        noStroke();
+        textSize(14);
+        textAlign(LEFT, CENTER);
+        text(cont, x, y);
     });
 }
 
-function drawContinentBullet(x, y, continent) {
-    const isHovered = (state.hoveredContinent === continent);
-
-    if (isHovered) {
-        fill(CONFIG.colors.text);
-        noStroke();
-        circle(x - 30, y, 14);
-    } else {
-        stroke(CONFIG.colors.accent);
-        strokeWeight(2);
-        noFill();
-        circle(x - 30, y, 12);
-    }
-}
-
-function drawContinentLabel(x, y, continent) {
-    const isHovered = (state.hoveredContinent === continent);
-    fill(isHovered ? CONFIG.colors.text : CONFIG.colors.text);
-    noStroke();
-    textSize(14);
-    textAlign(LEFT, CENTER);
-    text(continent, x - 10, y);
-}
-
-// ===== HOVER LEGENDA =====
-function checkLegendHover() {
-    state.hoveredImpactLevel = null;
-    
-    const boxX = width - CONFIG.layout.infoBoxWidth - CONFIG.layout.marginX;
-    const boxY = CONFIG.layout.legendBoxY;
-    const startY = boxY + 95;
-    const levelSpacing = 25;
-    const columnWidth = (CONFIG.layout.infoBoxWidth - 40) / 2;
-    const levelsPerColumn = Math.ceil(impactLevels.length / 2);
-    
-    // Controlla se il mouse è sopra l'area della legenda
-    if (mouseX > boxX && mouseX < boxX + CONFIG.layout.infoBoxWidth &&
-        mouseY > startY && mouseY < startY + (levelsPerColumn * levelSpacing)) {
-        
-        // Prima colonna
-        if (mouseX < boxX + columnWidth) {
-            const levelIndex = Math.floor((mouseY - startY) / levelSpacing);
-            if (levelIndex >= 0 && levelIndex < levelsPerColumn && levelIndex < impactLevels.length) {
-                state.hoveredImpactLevel = impactLevels[levelIndex];
-            }
-        }
-        // Seconda colonna
-        else {
-            const levelIndex = Math.floor((mouseY - startY) / levelSpacing);
-            const actualIndex = levelIndex + levelsPerColumn;
-            if (levelIndex >= 0 && actualIndex < impactLevels.length) {
-                state.hoveredImpactLevel = impactLevels[actualIndex];
-            }
-        }
-    }
-}
-
-// ===== INTERAZIONI =====
+// FUNZIONE: Controlla hover sui vulcani
 function checkHover() {
     if (state.filteredData.length === 0) {
         state.hoveredVolcano = null;
@@ -885,136 +965,151 @@ function checkHover() {
     }
 }
 
-function checkContinentHover() {
-    state.hoveredContinent = null;
-    
-    const mouseDistFromCenter = dist(mouseX, mouseY, state.centerX, state.centerY);
-    
-    CONTINENTS.forEach(cont => {
-        const angles = state.continentAngles[cont];
-        if (!angles) return;
-
-        const angle = angles.mid;
-        
-        let r;
-        if (cont === 'Europa' || cont === 'Asia') {
-            r = CONFIG.layout.maxRadius + CONFIG.layout.europeAsiaOffset;
-        } else {
-            r = CONFIG.layout.maxRadius + CONFIG.layout.continentLabelOffset;
-        }
-        
-        const x = state.centerX + cos(angle) * r;
-        const y = state.centerY + sin(angle) * r;
-
-        const hoverThreshold = (cont === 'Europa' || cont === 'Asia') ? 25 : 30;
-        
-        if (dist(mouseX, mouseY, x - 30, y) < hoverThreshold) {
-            state.hoveredContinent = cont;
-        }
-    });
-}
-
+// FUNZIONE: Gestisce il click del mouse
 function mousePressed() {
-    if (state.leftControlAreas) {
-        const leftBtn = state.leftControlAreas.leftButton;
-        const rightBtn = state.leftControlAreas.rightButton;
+    // Controllo pulsante Start Animation
+    if (state.startButtonArea &&
+        mouseX > state.startButtonArea.x &&
+        mouseX < state.startButtonArea.x + state.startButtonArea.width &&
+        mouseY > state.startButtonArea.y &&
+        mouseY < state.startButtonArea.y + state.startButtonArea.height) {
         
-        if (mouseX > leftBtn.x && mouseX < leftBtn.x + leftBtn.width &&
-            mouseY > leftBtn.y && mouseY < leftBtn.y + leftBtn.height) {
-            if (state.currentCenturiesIndex === 0) {
-                state.currentCenturiesIndex = CONFIG.centuries.length - 1;
-            } else {
-                state.currentCenturiesIndex = Math.max(0, state.currentCenturiesIndex - 1);
-            }
-            applyTemporalFilter();
-            return;
-        }
+        state.isPlaying = !state.isPlaying;
         
-        if (mouseX > rightBtn.x && mouseX < rightBtn.x + rightBtn.width &&
-            mouseY > rightBtn.y && mouseY < rightBtn.y + rightBtn.height) {
-            if (state.currentCenturiesIndex === CONFIG.centuries.length - 1) {
-                state.currentCenturiesIndex = 0;
-            } else {
-                state.currentCenturiesIndex = Math.min(CONFIG.centuries.length - 1, state.currentCenturiesIndex + 1);
-            }
-            applyTemporalFilter();
-            return;
-        }
-    }
-    
-    if (state.rightControlAreas) {
-        const leftBtn = state.rightControlAreas.leftButton;
-        const rightBtn = state.rightControlAreas.rightButton;
-        const playBtn = state.rightControlAreas.playPause;
-        
-        if (mouseX > playBtn.x && mouseX < playBtn.x + playBtn.width &&
-            mouseY > playBtn.y && mouseY < playBtn.y + playBtn.height) {
-            state.isPlaying = !state.isPlaying;
+        if (state.isPlaying && state.availableYears.length > 0) {
+            state.animationTimer = 0;
+            state.isPausedBetweenCycles = false;
             
-            if (state.isPlaying) {
-                state.animationTimer = 0;
-                state.isPausedBetweenCycles = false;
-                
-                const years = getEruptionYears();
-                if (years.length > 0 && state.timelineYear === null) {
-                    state.currentYearIndex = 0;
-                    state.timelineYear = years[0];
-                }
+            // Attiva l'anno solo se non è già attivo
+            if (!state.yearActivatedByUser) {
+                state.yearActivatedByUser = true;
+                state.currentYearIndex = 0;
+                state.timelineYear = state.availableYears[0];
+                state.displayedYear = state.availableYears[0];
             }
-            return;
+        } else if (state.availableYears.length === 0) {
+            state.isPlaying = false;
+        }
+        return;
+    }
+
+    // Controllo frecce sinistre del time frame
+    if (state.timeFrameLeftArrows &&
+        mouseX > state.timeFrameLeftArrows.x &&
+        mouseX < state.timeFrameLeftArrows.x + state.timeFrameLeftArrows.width &&
+        mouseY > state.timeFrameLeftArrows.y &&
+        mouseY < state.timeFrameLeftArrows.y + state.timeFrameLeftArrows.height) {
+        
+        if (state.selectedCentury === null) {
+            // Se siamo in "all centuries", vai all'ultimo periodo
+            state.selectedCentury = CONCENTRIC_YEARS[CONCENTRIC_YEARS.length - 2];
+        } else {
+            const currentIndex = CONCENTRIC_YEARS.indexOf(state.selectedCentury);
+            if (currentIndex > 0) {
+                // Vai al periodo precedente
+                state.selectedCentury = CONCENTRIC_YEARS[currentIndex - 1];
+            } else if (currentIndex === 0) {
+                // Torna a "all centuries"
+                state.selectedCentury = null;
+            }
+        }
+        applyFilters();
+        return;
+    }
+
+    // Controllo frecce destre del time frame
+    if (state.timeFrameRightArrows &&
+        mouseX > state.timeFrameRightArrows.x &&
+        mouseX < state.timeFrameRightArrows.x + state.timeFrameRightArrows.width &&
+        mouseY > state.timeFrameRightArrows.y &&
+        mouseY < state.timeFrameRightArrows.y + state.timeFrameRightArrows.height) {
+        
+        if (state.selectedCentury === null) {
+            // Se siamo in "all centuries", vai al primo periodo
+            state.selectedCentury = CONCENTRIC_YEARS[0];
+        } else {
+            const currentIndex = CONCENTRIC_YEARS.indexOf(state.selectedCentury);
+            if (currentIndex < CONCENTRIC_YEARS.length - 2) {
+                // Vai al periodo successivo
+                state.selectedCentury = CONCENTRIC_YEARS[currentIndex + 1];
+            } else if (currentIndex === CONCENTRIC_YEARS.length - 2) {
+                // Torna a "all centuries"
+                state.selectedCentury = null;
+            }
+        }
+        applyFilters();
+        return;
+    }
+
+    // Controllo freccia sinistra anno
+    if (state.yearLeftArrow &&
+        mouseX > state.yearLeftArrow.x &&
+        mouseX < state.yearLeftArrow.x + state.yearLeftArrow.width &&
+        mouseY > state.yearLeftArrow.y &&
+        mouseY < state.yearLeftArrow.y + state.yearLeftArrow.height &&
+        state.availableYears.length > 0) {
+        
+        // Attiva l'anno (prima interazione utente)
+        state.yearActivatedByUser = true;
+        state.isPlaying = false; // Ferma l'animazione se era attiva
+        
+        if (state.timelineYear === null) {
+            // Se non c'è un anno attivato, vai all'ultimo
+            state.currentYearIndex = state.availableYears.length - 1;
+        } else {
+            // Trova l'indice corrente
+            const currentIndex = state.availableYears.indexOf(state.timelineYear);
+            if (currentIndex > 0) {
+                state.currentYearIndex = currentIndex - 1;
+            } else if (currentIndex === 0) {
+                // Se siamo al primo anno, vai all'ultimo
+                state.currentYearIndex = state.availableYears.length - 1;
+            }
         }
         
-        if (mouseX > leftBtn.x && mouseX < leftBtn.x + leftBtn.width &&
-            mouseY > leftBtn.y && mouseY < leftBtn.y + leftBtn.height) {
-            const years = getEruptionYears();
-            if (years.length > 0) {
-                if (state.currentYearIndex === 0) {
-                    state.currentYearIndex = years.length - 1;
-                } else {
-                    state.currentYearIndex = Math.max(0, state.currentYearIndex - 1);
-                }
-                state.isPlaying = false;
-                updateTimelineYear();
+        state.timelineYear = state.availableYears[state.currentYearIndex];
+        state.displayedYear = state.availableYears[state.currentYearIndex];
+        return;
+    }
+
+    // Controllo freccia destra anno
+    if (state.yearRightArrow &&
+        mouseX > state.yearRightArrow.x &&
+        mouseX < state.yearRightArrow.x + state.yearRightArrow.width &&
+        mouseY > state.yearRightArrow.y &&
+        mouseY < state.yearRightArrow.y + state.yearRightArrow.height &&
+        state.availableYears.length > 0) {
+        
+        // Attiva l'anno (prima interazione utente)
+        state.yearActivatedByUser = true;
+        state.isPlaying = false; // Ferma l'animazione se era attiva
+        
+        if (state.timelineYear === null) {
+            // Se non c'è un anno attivato, vai al primo
+            state.currentYearIndex = 0;
+        } else {
+            // Trova l'indice corrente
+            const currentIndex = state.availableYears.indexOf(state.timelineYear);
+            if (currentIndex < state.availableYears.length - 1) {
+                state.currentYearIndex = currentIndex + 1;
+            } else if (currentIndex === state.availableYears.length - 1) {
+                // Se siamo all'ultimo anno, vai al primo
+                state.currentYearIndex = 0;
             }
-            return;
         }
         
-        if (mouseX > rightBtn.x && mouseX < rightBtn.x + rightBtn.width &&
-            mouseY > rightBtn.y && mouseY < rightBtn.y + rightBtn.height) {
-            const years = getEruptionYears();
-            if (years.length > 0) {
-                if (state.currentYearIndex === years.length - 1) {
-                    state.currentYearIndex = 0;
-                } else {
-                    state.currentYearIndex = Math.min(years.length - 1, state.currentYearIndex + 1);
-                }
-                state.isPlaying = false;
-                updateTimelineYear();
-            }
-            return;
-        }
+        state.timelineYear = state.availableYears[state.currentYearIndex];
+        state.displayedYear = state.availableYears[state.currentYearIndex];
+        return;
     }
 }
 
-function applyTemporalFilter() {
-    const century = CONFIG.centuries[state.currentCenturiesIndex];
-    state.selectedCentury = century.value;
-    applyFilters();
-    state.isPlaying = false;
-}
-
-function updateTimelineYear() {
-    const years = getEruptionYears();
-    if (years.length > 0) {
-        state.timelineYear = years[constrain(state.currentYearIndex, 0, years.length - 1)];
-    }
-}
-
-// ===== UTILITIES =====
+// FUNZIONE: Formatta l'anno in formato esteso
 function formatYear(year) {
     return year + (year < 0 ? ' BC' : ' AD');
 }
 
+// FUNZIONE: Formatta l'anno in formato abbreviato
 function formatYearShort(year) {
     if (year < 0) {
         return Math.abs(year) + ' BC';
@@ -1023,10 +1118,7 @@ function formatYearShort(year) {
     }
 }
 
-function getEruptionYears() {
-    return [...new Set(state.filteredData.map(v => v.year))].sort((a, b) => a - b);
-}
-
+// FUNZIONE: Gestisce il ridimensionamento della finestra
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight);
     updateLayout();
