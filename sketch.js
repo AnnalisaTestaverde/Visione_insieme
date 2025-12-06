@@ -15,30 +15,30 @@ const CONFIG = {
         selectedContinent: '#b9b9b988'
     },
     layout: {
-        centerXRatio: 0.75,
-        maxRadius: 420,
+        centerXRatio: 0.70, //posizione cerchio destra o sinistra
+        maxRadius: 400, //grandezza cerchio
         minRadius: 31.5,
-        continentLabelOffset: 70,
-        europeAsiaOffset: 45,
+        continentLabelOffset: 15, //distanza dalc erchioe sterno dei continenti
+        europeAsiaOffset: 15, //idem a sopra ma con europa e asia, se li mettevo assieme mi rompevano il codice
         infoBoxWidth: 200,
         infoBoxHeight: 80,
         bottomControlY: 100,
         marginX: 60,
-        fontSizeControls: 48,
-        centerYOffset: 40,
+        fontSizeControls: 36,
+        centerYOffset: 10, //posizione cerchio su o giù
         topOffset: -20,
         leftPanelWidth: 300,
         controlButtonHeight: 50,
         controlButtonWidth: 50,
-        // NUOVE DIMENSIONI PER I TESTI
-        timeframeFontSize: 36,   // Più grande, appena più piccolo del titolo (96)
-        yearFontSize: 36,        // Più grande, appena più piccolo del titolo (96)
-        labelFontSize: 20,
-        // POSIZIONI MODIFICATE (spostate verso il basso)
+        // DIMENSIONI PER I TESTI
+        timeframeFontSize: 30,   //dimensione time frame
+        yearFontSize: 45,        // dimensioen year
+        labelFontSize: 18,
+        // POSIZIONI SELECT TIME, YEAR E TITOLO
         titleStartY: 60,
-        buttonStartY: 320,      // MODIFICATO: spostato più in basso
-        timeframeStartY: 420,   // MODIFICATO: spostato più in basso
-        yearStartY: 520         // MODIFICATO: spostato più in basso
+        buttonStartY: 350,      
+        timeframeStartY: 650,   
+        yearStartY: 780         
     },
     centuries: [
         { label: 'all centuries', value: null },
@@ -57,7 +57,7 @@ const CONFIG = {
     ]
 };
 
-let impactLevels = [];
+let impactLevels = []; //Variabili globali
 let allImpacts = [];
 
 const CONCENTRIC_YEARS = [-4200, -3200, -2200, -1200, -200, 800, 1800, 1850, 1900, 1950, 2000, 2050];
@@ -580,7 +580,7 @@ function drawStartAnimationButton() {
     };
 }
 
-// FUNZIONE: Disegna il selettore del time frame
+// FUNZIONE: Disegna il selettore del time frame, quindi le freccettine
 function drawTemporalRangeSelector() {
     const startX = CONFIG.layout.marginX;
     const startY = CONFIG.layout.timeframeStartY; // MODIFICATO: posizione più in basso
@@ -610,21 +610,20 @@ function drawTemporalRangeSelector() {
         }
     }
 
-    // MODIFICATO: aumentata la distanza tra le frecce e il testo centrale
     // Disegna le due frecce a sinistra con quadratino (NERO)
     const leftArrowsX = startX;
     const leftArrowsY = controlsY;
     drawDoubleArrowWithBox(leftArrowsX, leftArrowsY, 60, 40, '<<', CONFIG.colors.text, true); // true = nero
 
     // Disegna gli anni al centro con più spazio
-    const yearX = leftArrowsX + 80; // MODIFICATO: aumentato da 70 a 80
+    const yearX = leftArrowsX + 60; 
     fill(CONFIG.colors.text); // Nero
-    textSize(CONFIG.layout.timeframeFontSize); // MODIFICATO: dimensione più grande
+    textSize(CONFIG.layout.timeframeFontSize);
     textAlign(CENTER, CENTER);
-    text(yearString, yearX + 140, leftArrowsY + 20); // MODIFICATO: aumentato lo spazio
+    text(yearString, yearX + 140, leftArrowsY + 20); 
 
     // Disegna le due frecce a destra con quadratino (NERO)
-    const rightArrowsX = yearX + 280; // MODIFICATO: aumentato da 240 a 280
+    const rightArrowsX = yearX + 280; 
     drawDoubleArrowWithBox(rightArrowsX, leftArrowsY, 60, 40, '>>', CONFIG.colors.text, true); // true = nero
 
     // Memorizza le aree per il click (aggiornate per le nuove dimensioni)
@@ -645,7 +644,7 @@ function drawTemporalRangeSelector() {
 // FUNZIONE: Disegna il selettore dell'anno
 function drawYearSelector() {
     const startX = CONFIG.layout.marginX;
-    const startY = CONFIG.layout.yearStartY; // MODIFICATO: posizione più in basso
+    const startY = CONFIG.layout.yearStartY; 
     const labelY = startY;
     const controlsY = startY + 40;
 
@@ -656,14 +655,14 @@ function drawYearSelector() {
     textAlign(LEFT, TOP);
     text('Select year:', startX, labelY);
 
-    // MODIFICATO: aumentata la distanza tra le frecce e il testo centrale
+
     // Freccia sinistra con quadratino (ROSSO)
     const leftArrowX = startX;
     const leftArrowY = controlsY;
     drawSingleArrowWithBox(leftArrowX, leftArrowY, 50, 40, '<', CONFIG.colors.accent, false); // false = rosso
 
     // Anno da mostrare (displayedYear, non timelineYear)
-    const yearX = leftArrowX + 70; // MODIFICATO: aumentato da 60 a 70
+    const yearX = leftArrowX + 70;
     
     let yearText;
     if (state.displayedYear !== null) {
@@ -677,9 +676,9 @@ function drawYearSelector() {
     
     // Anno sempre in ROSSO
     fill(CONFIG.colors.accent); // SEMPRE ROSSO
-    textSize(CONFIG.layout.yearFontSize); // MODIFICATO: dimensione più grande
+    textSize(CONFIG.layout.yearFontSize); 
     textAlign(CENTER, CENTER);
-    text(yearText, yearX + 120, leftArrowY + 20); // MODIFICATO: aggiustata la posizione
+    text(yearText, yearX + 110, leftArrowY + 20); 
 
     // Freccia destra con quadratino (ROSSO)
     const rightArrowX = yearX + 240; // MODIFICATO: aumentato da 200 a 240
@@ -905,6 +904,7 @@ function drawVolcanoDot(x, y, isHighlighted, isHovered) {
 }
 
 // FUNZIONE: Disegna le etichette dei continenti (SENZA cerchietto, posizione originale fuori dal cerchio)
+// FUNZIONE: Disegna le etichette dei continenti
 function drawContinentLabels() {
     CONTINENTS.forEach(cont => {
         const angles = state.continentAngles[cont];
@@ -912,7 +912,6 @@ function drawContinentLabels() {
 
         const angle = angles.mid;
         
-        // Posiziona il testo fuori dal cerchio (come nella versione originale)
         let r;
         if (cont === 'Europa' || cont === 'Asia') {
             r = CONFIG.layout.maxRadius + CONFIG.layout.europeAsiaOffset;
@@ -927,11 +926,31 @@ function drawContinentLabels() {
             state.asiaLabelY = y;
         }
 
-        // Nome continente (allineato a sinistra rispetto al punto)
         fill(CONFIG.colors.text);
         noStroke();
         textSize(14);
-        textAlign(LEFT, CENTER);
+        
+        // Allineamento orizzontale in base alla posizione angolare
+        let horizAlign = LEFT;
+        if (cos(angle) < -0.1) { // Se è sul lato sinistro (coseno negativo)
+            horizAlign = RIGHT;
+        } else if (cos(angle) > 0.1) { // Se è sul lato destro (coseno positivo)
+            horizAlign = LEFT;
+        } else { // Se è circa in alto o in basso (coseno ~0)
+            horizAlign = CENTER;
+        }
+        
+        // Allineamento verticale in base alla posizione angolare
+        let vertAlign = CENTER;
+        if (sin(angle) < -0.1) { // Se è nella parte superiore (sin negativo, perché in p5.js l'asse Y va verso il basso)
+            vertAlign = BOTTOM;
+        } else if (sin(angle) > 0.1) { // Se è nella parte inferiore (sin positivo)
+            vertAlign = TOP;
+        } else {
+            vertAlign = CENTER;
+        }
+        
+        textAlign(horizAlign, vertAlign);
         text(cont, x, y);
     });
 }
