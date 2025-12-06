@@ -63,10 +63,9 @@ let allImpacts = [];
 const CONCENTRIC_YEARS = [-4200, -3200, -2200, -1200, -200, 800, 1800, 1850, 1900, 1950, 2000, 2050];
 
 // Costanti per l'animazione
-const SELECTION_ANIMATION_DURATION = 150; // Bagliore più veloce
-const HOVER_ANIMATION_DURATION = 150;    // Bagliore più veloce
-const CIRCLE_REVEAL_DURATION = 1500;     // Animazione dei cerchi più lenta
-const VOLCANO_REVEAL_DURATION = 1200;    // Aumentato per animazione più fluida
+const SELECTION_ANIMATION_DURATION = 500; // ms
+const HOVER_ANIMATION_DURATION = 300; // ms
+const CIRCLE_REVEAL_DURATION = 1500; // MODIFICATO: aumentato da 800ms a 1500ms per animazione più lenta
 
 // ===== STATO APPLICAZIONE =====
 let state = {
@@ -90,7 +89,7 @@ let state = {
     asiaLabelY: 0,
     // VARIABILI PER ANIMAZIONE
     animationTimer: 0,
-    animationSpeed: 400, // MODIFICATO: 400ms invece di 1000ms (animazione più veloce)
+    animationSpeed: 200,
     pauseBetweenCycles: 1000,
     isPausedBetweenCycles: false,
     // VARIABILI PER I NUOVI CONTROLLI
@@ -111,12 +110,7 @@ let state = {
     hoverAnimationStart: new Map(),
     // NUOVO: animazione per i cerchi rossi
     circleRevealStart: null,
-    circleRevealProgress: 0,
-    // NUOVO: animazione per la comparsa dei vulcani
-    volcanoRevealStart: null,
-    volcanoRevealProgress: 0,
-    // NUOVO: mappa per i timer individuali di comparsa dei vulcani
-    volcanoAppearTimers: new Map()
+    circleRevealProgress: 0
 };
 
 // Variabile per l'immagine di sfondo radiale
@@ -210,24 +204,6 @@ function initializeData() {
     
     // Inizia l'animazione di apertura dei cerchi
     state.circleRevealStart = millis();
-    // Inizia l'animazione per la comparsa dei vulcani (con ritardo)
-    state.volcanoRevealStart = millis() + CIRCLE_REVEAL_DURATION * 0.7; // Inizia quando i cerchi sono al 70%
-    
-    // Inizializza i timer di comparsa per ogni vulcano
-    initializeVolcanoAppearTimers();
-}
-
-// NUOVA FUNZIONE: Inizializza i timer di comparsa per ogni vulcano
-function initializeVolcanoAppearTimers() {
-    state.volcanoAppearTimers.clear();
-    
-    state.filteredData.forEach(v => {
-        let key = `${v.name}-${v.year}-${v.deaths}`;
-        // Timer casuale distribuito nella durata dell'animazione
-        // I vulcani appaiono in modo più distribuito, non tutti insieme
-        const randomDelay = random(0, VOLCANO_REVEAL_DURATION * 0.8);
-        state.volcanoAppearTimers.set(key, state.volcanoRevealStart + randomDelay);
-    });
 }
 
 // FUNZIONE: Setup iniziale di p5.js
@@ -316,7 +292,8 @@ function updateAvailableYears() {
     }
     
     // Quando cambiamo periodo, resettiamo l'evidenziazione
-    state.timelineYear = null;
+    // Ma manteniamo l'anno da mostrare nel selettore (il primo disponibile)
+    state.timelineYear = null; // RIMOSSO: non evidenziazione automatica
     state.displayedYear = state.availableYears.length > 0 ? state.availableYears[0] : null;
     state.currentYearIndex = 0;
     state.yearActivatedByUser = false; // Resetta il flag
@@ -326,10 +303,9 @@ function updateAvailableYears() {
     state.animationTimer = 0;
     state.isPausedBetweenCycles = false;
     
-    // Resetta completamente le animazioni
+    // Resetta le animazioni dei vulcani
     state.selectionAnimationStart.clear();
     state.hoverAnimationStart.clear();
-    state.volcanoAppearTimers.clear();
 }
 
 // FUNZIONE: Calcola il raggio in base al livello di impatto
@@ -370,7 +346,7 @@ function drawImpactCircles() {
         const isSpecial = specialIndices.includes(i);
         
         if (isSpecial) {
-            // Animazione di apertura per i cerchi speciale
+            // Animazione di apertura per i cerchi speciali
             let animatedRadius = radius;
             let animatedStrokeWeight = 2;
             let animatedAlpha = 255;
@@ -495,7 +471,6 @@ function updateAnimation() {
     if (!state.yearActivatedByUser) {
         state.yearActivatedByUser = true;
         state.timelineYear = state.availableYears[state.currentYearIndex];
-        state.displayedYear = state.availableYears[state.currentYearIndex];
         // Resetta le animazioni di selezione
         state.selectionAnimationStart.clear();
     }
@@ -507,7 +482,6 @@ function updateAnimation() {
             state.isPausedBetweenCycles = false;
             state.currentYearIndex = 0;
             state.timelineYear = state.availableYears[0];
-            state.displayedYear = state.availableYears[0];
         }
         return;
     }
@@ -526,7 +500,6 @@ function updateAnimation() {
     }
     
     state.timelineYear = state.availableYears[state.currentYearIndex];
-    state.displayedYear = state.availableYears[state.currentYearIndex];
 }
 
 // FUNZIONE: Loop principale di disegno
@@ -637,21 +610,21 @@ function drawTemporalRangeSelector() {
         }
     }
 
-    // MODIFICATO: aumentata ulteriormente la distanza tra le frecce e il testo centrale
+    // MODIFICATO: aumentata la distanza tra le frecce e il testo centrale
     // Disegna le due frecce a sinistra con quadratino (NERO)
     const leftArrowsX = startX;
     const leftArrowsY = controlsY;
     drawDoubleArrowWithBox(leftArrowsX, leftArrowsY, 60, 40, '<<', CONFIG.colors.text, true); // true = nero
 
     // Disegna gli anni al centro con più spazio
-    const yearX = leftArrowsX + 120; // MODIFICATO: aumentato da 100 a 120
+    const yearX = leftArrowsX + 80; // MODIFICATO: aumentato da 70 a 80
     fill(CONFIG.colors.text); // Nero
     textSize(CONFIG.layout.timeframeFontSize); // MODIFICATO: dimensione più grande
     textAlign(CENTER, CENTER);
     text(yearString, yearX + 140, leftArrowsY + 20); // MODIFICATO: aumentato lo spazio
 
     // Disegna le due frecce a destra con quadratino (NERO)
-    const rightArrowsX = yearX + 340; // MODIFICATO: aumentato da 320 a 340
+    const rightArrowsX = yearX + 280; // MODIFICATO: aumentato da 240 a 280
     drawDoubleArrowWithBox(rightArrowsX, leftArrowsY, 60, 40, '>>', CONFIG.colors.text, true); // true = nero
 
     // Memorizza le aree per il click (aggiornate per le nuove dimensioni)
@@ -683,14 +656,14 @@ function drawYearSelector() {
     textAlign(LEFT, TOP);
     text('Select year:', startX, labelY);
 
-    // MODIFICATO: ridotto il gap tra le frecce e il testo centrale
+    // MODIFICATO: aumentata la distanza tra le frecce e il testo centrale
     // Freccia sinistra con quadratino (ROSSO)
     const leftArrowX = startX;
     const leftArrowY = controlsY;
     drawSingleArrowWithBox(leftArrowX, leftArrowY, 50, 40, '<', CONFIG.colors.accent, false); // false = rosso
 
     // Anno da mostrare (displayedYear, non timelineYear)
-    const yearX = leftArrowX + 60; // MODIFICATO: ridotto da 70 a 60
+    const yearX = leftArrowX + 70; // MODIFICATO: aumentato da 60 a 70
     
     let yearText;
     if (state.displayedYear !== null) {
@@ -706,10 +679,10 @@ function drawYearSelector() {
     fill(CONFIG.colors.accent); // SEMPRE ROSSO
     textSize(CONFIG.layout.yearFontSize); // MODIFICATO: dimensione più grande
     textAlign(CENTER, CENTER);
-    text(yearText, yearX + 90, leftArrowY + 20); // MODIFICATO: ridotta la distanza
+    text(yearText, yearX + 120, leftArrowY + 20); // MODIFICATO: aggiustata la posizione
 
     // Freccia destra con quadratino (ROSSO)
-    const rightArrowX = yearX + 200; // MODIFICATO: ridotto da 220 a 200
+    const rightArrowX = yearX + 240; // MODIFICATO: aumentato da 200 a 240
     drawSingleArrowWithBox(rightArrowX, leftArrowY, 50, 40, '>', CONFIG.colors.accent, false); // false = rosso
 
     // Memorizza le aree per il click
@@ -829,18 +802,8 @@ function drawContinentDividers() {
     });
 }
 
-// FUNZIONE: Disegna tutti i vulcani filtrati (con animazione di comparsa distribuita)
+// FUNZIONE: Disegna tutti i vulcani filtrati
 function drawVolcanoes() {
-    // Se l'animazione dei cerchi non è completata, non disegnare i vulcani
-    if (state.circleRevealProgress < 0.8) {
-        return;
-    }
-    
-    // Se i timer di comparsa non sono stati inizializzati, inizializzali
-    if (state.volcanoAppearTimers.size === 0 && state.filteredData.length > 0) {
-        initializeVolcanoAppearTimers();
-    }
-    
     state.filteredData.forEach(v => {
         let key = `${v.name}-${v.year}-${v.deaths}`;
         let angle = state.volcanoPositions.get(key);
@@ -848,26 +811,6 @@ function drawVolcanoes() {
 
         if (!angle && angles) angle = angles.mid;
         if (!angle) return; 
-
-        // Se timelineYear è null e c'è un'animazione attiva, resettala
-        if (state.timelineYear === null && state.selectionAnimationStart.has(key)) {
-            state.selectionAnimationStart.delete(key);
-        }
-
-        // Calcola il progresso di comparsa per questo vulcano specifico
-        let volcanoProgress = 0;
-        if (state.volcanoAppearTimers.has(key)) {
-            const appearTime = state.volcanoAppearTimers.get(key);
-            if (millis() >= appearTime) {
-                const elapsed = millis() - appearTime;
-                volcanoProgress = constrain(elapsed / (VOLCANO_REVEAL_DURATION * 0.6), 0, 1);
-            }
-        }
-        
-        // Se il vulcano non deve ancora apparire, salta
-        if (volcanoProgress <= 0) {
-            return;
-        }
 
         const r = getRadiusForImpact(v.impact);
         const x = cos(angle) * r;
@@ -911,33 +854,30 @@ function drawVolcanoes() {
             hoverProgress = constrain(elapsed / HOVER_ANIMATION_DURATION, 0, 1);
         }
 
-        // Calcola l'opacità in base all'animazione di comparsa del vulcano
-        let volcanoAlpha = 255 * volcanoProgress;
-
-        // Disegna il bagliore se necessario (con animazione di comparsa)
+        // Disegna il bagliore se necessario
         if (isHighlighted || isHovered) {
-            drawVolcanoGlow(v, x, y, isHighlighted, isHovered, selectionProgress, hoverProgress, volcanoAlpha);
+            drawVolcanoGlow(v, x, y, isHighlighted, isHovered, selectionProgress, hoverProgress);
         }
         
-        // Disegna il punto del vulcano (con animazione di comparsa)
-        drawVolcanoDot(x, y, isHighlighted, isHovered, volcanoAlpha);
+        // Disegna il punto del vulcano
+        drawVolcanoDot(x, y, isHighlighted, isHovered);
     });
 }
 
 // FUNZIONE: Disegna l'effetto glow per vulcani evidenziati o in hover (con animazione)
-function drawVolcanoGlow(volcano, x, y, isHighlighted, isHovered, selectionProgress, hoverProgress, volcanoAlpha) {
+function drawVolcanoGlow(volcano, x, y, isHighlighted, isHovered, selectionProgress, hoverProgress) {
     let glowSize, alpha;
     
     if (isHighlighted) {
         let baseSize = map(volcano.impact, 5, 15, 60, 90);
         let baseAlpha = map(volcano.impact, 5, 15, 70, 100);
         glowSize = selectionProgress * baseSize;
-        alpha = selectionProgress * baseAlpha * (volcanoAlpha / 255); // Include animazione comparsa
+        alpha = selectionProgress * baseAlpha;
     } else if (isHovered) {
         let baseSize = map(volcano.impact, 5, 15, 50, 80);
         let baseAlpha = map(volcano.impact, 5, 15, 60, 90);
         glowSize = hoverProgress * baseSize;
-        alpha = hoverProgress * baseAlpha * (volcanoAlpha / 255); // Include animazione comparsa
+        alpha = hoverProgress * baseAlpha;
     } else {
         return; // non dovrebbe succedere
     }
@@ -947,18 +887,18 @@ function drawVolcanoGlow(volcano, x, y, isHighlighted, isHovered, selectionProgr
     circle(x, y, glowSize);
 }
 
-// FUNZIONE: Disegna il punto del vulcano (con animazione di comparsa)
-function drawVolcanoDot(x, y, isHighlighted, isHovered, volcanoAlpha) {
+// FUNZIONE: Disegna il punto del vulcano
+function drawVolcanoDot(x, y, isHighlighted, isHovered) {
     if (isHighlighted) {
-        fill(CONFIG.colors.highlightGlow[0], CONFIG.colors.highlightGlow[1], CONFIG.colors.highlightGlow[2], volcanoAlpha);
+        fill(CONFIG.colors.highlightGlow);
         noStroke();
         circle(x, y, 10);
     } else if (isHovered) {
-        fill(CONFIG.colors.text[0], CONFIG.colors.text[1], CONFIG.colors.text[2], volcanoAlpha);
+        fill(CONFIG.colors.text);
         noStroke();
         circle(x, y, 8);
     } else {
-        fill(CONFIG.colors.text[0], CONFIG.colors.text[1], CONFIG.colors.text[2], volcanoAlpha);
+        fill(CONFIG.colors.text);
         noStroke();
         circle(x, y, 5);
     }
@@ -998,12 +938,6 @@ function drawContinentLabels() {
 
 // FUNZIONE: Controlla hover sui vulcani
 function checkHover() {
-    // Se l'animazione dei vulcani non è completata, non controllare l'hover
-    if (state.volcanoRevealProgress < 1) {
-        state.hoveredVolcano = null;
-        return;
-    }
-    
     if (state.filteredData.length === 0) {
         state.hoveredVolcano = null;
     } else {
@@ -1055,10 +989,6 @@ function mousePressed() {
             }
         } else if (state.availableYears.length === 0) {
             state.isPlaying = false;
-        } else {
-            // Quando si ferma l'animazione, resetta le evidenziazioni ma mantieni l'anno visualizzato
-            state.timelineYear = null;
-            state.selectionAnimationStart.clear();
         }
         return;
     }
