@@ -18,7 +18,7 @@ const CONFIG = {
         centerXRatio: 0.70, //posizione cerchio destra o sinistra
         maxRadius: 400, //grandezza cerchio
         minRadius: 31.5,
-        continentLabelOffset: 15, //distanza dalc erchioe sterno dei continenti
+        continentLabelOffset: 15, //distanza dal cerchio esterno dei continenti
         europeAsiaOffset: 15, //idem a sopra ma con europa e asia, se li mettevo assieme mi rompevano il codice
         infoBoxWidth: 200,
         infoBoxHeight: 80,
@@ -39,6 +39,17 @@ const CONFIG = {
         buttonStartY: 350,      
         timeframeStartY: 650,   
         yearStartY: 780         
+    },
+    animation: { // NUOVA SEZIONE: parametri per le animazioni
+        dotEntryDuration: 800,
+        dotStaggerDelay: 30,
+        dotPopScale: 1.4,
+        randomDelayMax: 600,
+        waveDuration: 1000,
+        easingFunction: 'easeOutBack',
+        // NUOVO: parametri per animazioni veloci (quando si clicca Start Animation)
+        fastDotEntryDuration: 400,
+        fastRandomDelayMax: 200
     },
     centuries: [
         { label: 'all centuries', value: null },
@@ -63,9 +74,13 @@ let allImpacts = [];
 const CONCENTRIC_YEARS = [-4200, -3200, -2200, -1200, -200, 800, 1800, 1850, 1900, 1950, 2000, 2050];
 
 // Costanti per l'animazione
-const SELECTION_ANIMATION_DURATION = 500; // ms
+const SELECTION_ANIMATION_DURATION = 800; // MODIFICATO: aumentato da 500 a 800ms per bagliore più visibile
 const HOVER_ANIMATION_DURATION = 300; // ms
 const CIRCLE_REVEAL_DURATION = 1500; // MODIFICATO: aumentato da 800ms a 1500ms per animazione più lenta
+// MODIFICATO: Velocità diverse per animazione manuale vs automatica
+const TIMELINE_ANIMATION_SPEED_NORMAL = 500; // Velocità normale (quando l'utente clicca manualmente)
+const TIMELINE_ANIMATION_SPEED_FAST = 800; // MODIFICATO: Velocità più lenta per Start Animation (era 200ms, ora 800ms)
+const TIMELINE_PAUSE_BETWEEN_CYCLES = 1000; // Pausa tra un ciclo e l'altro
 
 // ===== STATO APPLICAZIONE =====
 let state = {
@@ -89,8 +104,8 @@ let state = {
     asiaLabelY: 0,
     // VARIABILI PER ANIMAZIONE
     animationTimer: 0,
-    animationSpeed: 200,
-    pauseBetweenCycles: 1000,
+    animationSpeed: TIMELINE_ANIMATION_SPEED_NORMAL, // MODIFICATO: usa costante
+    pauseBetweenCycles: TIMELINE_PAUSE_BETWEEN_CYCLES, // MODIFICATO: usa costante
     isPausedBetweenCycles: false,
     // VARIABILI PER I NUOVI CONTROLLI
     startButtonArea: null,
@@ -110,7 +125,17 @@ let state = {
     hoverAnimationStart: new Map(),
     // NUOVO: animazione per i cerchi rossi
     circleRevealStart: null,
-    circleRevealProgress: 0
+    circleRevealProgress: 0,
+    // NUOVE VARIABILI PER ANIMAZIONE DOTS
+    dotAnimationStart: null,
+    dotAnimationProgress: 0,
+    dotAppearTimes: new Map(),
+    waveAnimationStart: null,
+    waveAnimationProgress: 0,
+    // NUOVA: flag per disabilitare animazione entrata dots durante timeline
+    disableDotEntryAnimation: false,
+    // NUOVA: flag per indicare se usare animazioni veloci
+    useFastAnimations: false
 };
 
 // Variabile per l'immagine di sfondo radiale
@@ -204,6 +229,25 @@ function initializeData() {
     
     // Inizia l'animazione di apertura dei cerchi
     state.circleRevealStart = millis();
+    
+    // Inizia l'animazione dei dots dopo i cerchi (usando animazioni normali)
+    state.dotAnimationStart = millis() + 300;
+    state.dotAnimationProgress = 0;
+    state.useFastAnimations = false;
+    
+    // Inizializza l'animazione a onde
+    state.waveAnimationStart = null;
+    state.waveAnimationProgress = 0;
+    
+    // Calcola i tempi di apparizione randomica per ogni dot (usando tempi normali)
+    state.dotAppearTimes.clear();
+    state.filteredData.forEach(v => {
+        let key = `${v.name}-${v.year}-${v.deaths}`;
+        const randomDelay = Math.random() * CONFIG.animation.randomDelayMax;
+        state.dotAppearTimes.set(key, randomDelay);
+    });
+    
+    state.disableDotEntryAnimation = false;
 }
 
 // FUNZIONE: Setup iniziale di p5.js
@@ -293,7 +337,7 @@ function updateAvailableYears() {
     
     // Quando cambiamo periodo, resettiamo l'evidenziazione
     // Ma manteniamo l'anno da mostrare nel selettore (il primo disponibile)
-    state.timelineYear = null; // RIMOSSO: non evidenziazione automatica
+    state.timelineYear = null;
     state.displayedYear = state.availableYears.length > 0 ? state.availableYears[0] : null;
     state.currentYearIndex = 0;
     state.yearActivatedByUser = false; // Resetta il flag
@@ -302,10 +346,24 @@ function updateAvailableYears() {
     state.isPlaying = false;
     state.animationTimer = 0;
     state.isPausedBetweenCycles = false;
+    state.useFastAnimations = false; // MODIFICATO: reset animazioni veloci
     
     // Resetta le animazioni dei vulcani
     state.selectionAnimationStart.clear();
     state.hoverAnimationStart.clear();
+    
+    // Resetta animazione dots (usando animazioni normali)
+    state.dotAnimationStart = millis();
+    state.dotAnimationProgress = 0;
+    state.disableDotEntryAnimation = false;
+    
+    // Calcola i tempi di apparizione randomica per ogni dot (usando tempi normali)
+    state.dotAppearTimes.clear();
+    state.filteredData.forEach(v => {
+        let key = `${v.name}-${v.year}-${v.deaths}`;
+        const randomDelay = Math.random() * CONFIG.animation.randomDelayMax;
+        state.dotAppearTimes.set(key, randomDelay);
+    });
 }
 
 // FUNZIONE: Calcola il raggio in base al livello di impatto
@@ -452,6 +510,20 @@ function applyFilters() {
 
     calculateContinentData();
     updateAvailableYears(); // Aggiorna gli anni disponibili dopo il filtro
+    
+    // MODIFICATO: Inizia animazione dots quando si applicano filtri (usando animazioni normali)
+    if (state.selectedCentury !== null || state.selectedContinent !== null) {
+        state.useFastAnimations = false;
+        state.dotAnimationStart = millis();
+        state.dotAnimationProgress = 0;
+        
+        state.dotAppearTimes.clear();
+        state.filteredData.forEach(v => {
+            let key = `${v.name}-${v.year}-${v.deaths}`;
+            const randomDelay = Math.random() * CONFIG.animation.randomDelayMax;
+            state.dotAppearTimes.set(key, randomDelay);
+        });
+    }
 }
 
 // FUNZIONE: Ottiene il range globale di anni dai dati
@@ -471,6 +543,8 @@ function updateAnimation() {
     if (!state.yearActivatedByUser) {
         state.yearActivatedByUser = true;
         state.timelineYear = state.availableYears[state.currentYearIndex];
+        // MODIFICATO: aggiorna anche displayedYear
+        state.displayedYear = state.availableYears[state.currentYearIndex];
         // Resetta le animazioni di selezione
         state.selectionAnimationStart.clear();
     }
@@ -482,6 +556,8 @@ function updateAnimation() {
             state.isPausedBetweenCycles = false;
             state.currentYearIndex = 0;
             state.timelineYear = state.availableYears[0];
+            // MODIFICATO: aggiorna anche displayedYear
+            state.displayedYear = state.availableYears[0];
         }
         return;
     }
@@ -499,7 +575,60 @@ function updateAnimation() {
         }
     }
     
+    // MODIFICATO: Aggiorna sia timelineYear che displayedYear durante l'animazione
     state.timelineYear = state.availableYears[state.currentYearIndex];
+    state.displayedYear = state.availableYears[state.currentYearIndex];
+}
+
+// NUOVA FUNZIONE: Aggiorna le animazioni dei dots
+function updateDotAnimations() {
+    if (state.isPlaying) {
+        state.disableDotEntryAnimation = true;
+    } else if (!state.isPlaying && state.dotAnimationStart === null) {
+        state.disableDotEntryAnimation = false;
+    }
+    
+    if (state.dotAnimationStart !== null) {
+        const elapsed = millis() - state.dotAnimationStart;
+        const duration = state.useFastAnimations ? 
+            CONFIG.animation.fastDotEntryDuration : 
+            CONFIG.animation.dotEntryDuration;
+        
+        state.dotAnimationProgress = constrain(elapsed / duration, 0, 1);
+        
+        if (state.dotAnimationProgress >= 1) {
+            state.dotAnimationStart = null;
+        }
+    }
+    
+    if (state.waveAnimationStart !== null) {
+        const waveElapsed = millis() - state.waveAnimationStart;
+        state.waveAnimationProgress = constrain(waveElapsed / CONFIG.animation.waveDuration, 0, 1);
+        
+        if (state.waveAnimationProgress >= 1) {
+            state.waveAnimationStart = null;
+        }
+    }
+}
+
+// NUOVA FUNZIONE: Inizia animazioni veloci per i dots
+function startFastDotAnimations() {
+    state.useFastAnimations = true;
+    state.dotAnimationStart = millis();
+    state.dotAnimationProgress = 0;
+    
+    state.dotAppearTimes.clear();
+    state.filteredData.forEach(v => {
+        let key = `${v.name}-${v.year}-${v.deaths}`;
+        const randomDelay = Math.random() * CONFIG.animation.fastRandomDelayMax;
+        state.dotAppearTimes.set(key, randomDelay);
+    });
+}
+
+// NUOVA FUNZIONE: Trigger animazione a onde
+function triggerWaveAnimation() {
+    state.waveAnimationStart = millis();
+    state.waveAnimationProgress = 0;
 }
 
 // FUNZIONE: Loop principale di disegno
@@ -508,6 +637,7 @@ function draw() {
     updateLayout();
     
     updateAnimation();
+    updateDotAnimations();
     
     drawTitle();
     drawStartAnimationButton();
@@ -532,10 +662,9 @@ function drawTitle() {
     fill(CONFIG.colors.text);
     text('SIGNIFICANT', CONFIG.layout.marginX, titleY);
 
-     fill(CONFIG.colors.text);
+    fill(CONFIG.colors.text);
     text('VOLCANIC', CONFIG.layout.marginX, titleY + 90);
      
-    
     fill(CONFIG.colors.accent);
     text('ERUPTIONS', CONFIG.layout.marginX, titleY + 180);
     
@@ -555,21 +684,29 @@ function drawStartAnimationButton() {
     noFill();
     rect(buttonX, buttonY, buttonWidth, buttonHeight, 5);
 
-    // Disegna il triangolino play
+    // Disegna il triangolino play o quadratino stop
     fill(CONFIG.colors.accent);
     noStroke();
-    triangle(
-        buttonX + 15, buttonY + 15,
-        buttonX + 15, buttonY + 35,
-        buttonX + 35, buttonY + 25
-    );
+    
+    if (state.isPlaying) {
+        // Disegna quadratino stop
+        rect(buttonX + 15, buttonY + 15, 20, 20);
+    } else {
+        // Disegna triangolino play
+        triangle(
+            buttonX + 15, buttonY + 15,
+            buttonX + 15, buttonY + 35,
+            buttonX + 35, buttonY + 25
+        );
+    }
 
     // Disegna il testo
     fill(CONFIG.colors.text);
     noStroke();
     textSize(14);
     textAlign(LEFT, CENTER);
-    text('Start Animation', buttonX + 50, buttonY + 25);
+    const buttonText = state.isPlaying ? 'Stop Animation' : 'Start Animation';
+    text(buttonText, buttonX + 50, buttonY + 25);
 
     // Memorizza l'area del pulsante per il click
     state.startButtonArea = {
@@ -858,25 +995,84 @@ function drawVolcanoes() {
             drawVolcanoGlow(v, x, y, isHighlighted, isHovered, selectionProgress, hoverProgress);
         }
         
-        // Disegna il punto del vulcano
-        drawVolcanoDot(x, y, isHighlighted, isHovered);
+        // Disegna il punto del vulcano con animazione
+        drawVolcanoDotAnimated(x, y, isHighlighted, isHovered, v, key);
     });
 }
 
-// FUNZIONE: Disegna l'effetto glow per vulcani evidenziati o in hover (con animazione)
+// MODIFICATA: Disegna il punto del vulcano con animazione
+function drawVolcanoDotAnimated(x, y, isHighlighted, isHovered, volcano, key) {
+    let entryProgress = 1;
+    
+    if (!state.disableDotEntryAnimation && state.dotAnimationStart !== null && state.dotAnimationProgress < 1) {
+        const appearTime = state.dotAppearTimes.get(key) || 0;
+        const elapsed = millis() - state.dotAnimationStart;
+        
+        if (elapsed >= appearTime) {
+            const dotElapsed = elapsed - appearTime;
+            const duration = state.useFastAnimations ? 
+                CONFIG.animation.fastDotEntryDuration : 
+                CONFIG.animation.dotEntryDuration;
+            entryProgress = constrain(dotElapsed / duration, 0, 1);
+        } else {
+            entryProgress = 0;
+        }
+    }
+    
+    if (entryProgress === 0) return;
+    
+    const baseSize = isHighlighted ? 10 : isHovered ? 8 : 5;
+    const finalSize = baseSize * entryProgress;
+    const alpha = 255 * entryProgress;
+    
+    let color;
+    if (isHighlighted) {
+        color = CONFIG.colors.highlightGlow;
+    } else if (isHovered) {
+        color = CONFIG.colors.text;
+    } else {
+        color = CONFIG.colors.text;
+    }
+    
+    fill(red(color), green(color), blue(color), alpha);
+    noStroke();
+    circle(x, y, finalSize);
+}
+
+// MODIFICATA: Disegna l'effetto glow con durata adattabile
 function drawVolcanoGlow(volcano, x, y, isHighlighted, isHovered, selectionProgress, hoverProgress) {
+    let entryProgress = 1;
+    const key = `${volcano.name}-${volcano.year}-${volcano.deaths}`;
+    
+    if (!state.disableDotEntryAnimation && state.dotAnimationStart !== null && state.dotAnimationProgress < 1) {
+        const appearTime = state.dotAppearTimes.get(key) || 0;
+        const elapsed = millis() - state.dotAnimationStart;
+        
+        if (elapsed >= appearTime) {
+            const dotElapsed = elapsed - appearTime;
+            const duration = state.useFastAnimations ? 
+                CONFIG.animation.fastDotEntryDuration : 
+                CONFIG.animation.dotEntryDuration;
+            entryProgress = constrain(dotElapsed / duration, 0, 1);
+        } else {
+            entryProgress = 0;
+        }
+    }
+    
+    if (entryProgress === 0) return;
+    
     let glowSize, alpha;
     
     if (isHighlighted) {
         let baseSize = map(volcano.impact, 5, 15, 60, 90);
         let baseAlpha = map(volcano.impact, 5, 15, 70, 100);
-        glowSize = selectionProgress * baseSize;
-        alpha = selectionProgress * baseAlpha;
+        glowSize = selectionProgress * baseSize * entryProgress;
+        alpha = selectionProgress * baseAlpha * entryProgress;
     } else if (isHovered) {
         let baseSize = map(volcano.impact, 5, 15, 50, 80);
         let baseAlpha = map(volcano.impact, 5, 15, 60, 90);
-        glowSize = hoverProgress * baseSize;
-        alpha = hoverProgress * baseAlpha;
+        glowSize = hoverProgress * baseSize * entryProgress;
+        alpha = hoverProgress * baseAlpha * entryProgress;
     } else {
         return; // non dovrebbe succedere
     }
@@ -884,23 +1080,6 @@ function drawVolcanoGlow(volcano, x, y, isHighlighted, isHovered, selectionProgr
     fill(255, 43, 0, alpha);
     noStroke();
     circle(x, y, glowSize);
-}
-
-// FUNZIONE: Disegna il punto del vulcano
-function drawVolcanoDot(x, y, isHighlighted, isHovered) {
-    if (isHighlighted) {
-        fill(CONFIG.colors.highlightGlow);
-        noStroke();
-        circle(x, y, 10);
-    } else if (isHovered) {
-        fill(CONFIG.colors.text);
-        noStroke();
-        circle(x, y, 8);
-    } else {
-        fill(CONFIG.colors.text);
-        noStroke();
-        circle(x, y, 5);
-    }
 }
 
 // FUNZIONE: Disegna le etichette dei continenti (SENZA cerchietto, posizione originale fuori dal cerchio)
@@ -984,7 +1163,7 @@ function checkHover() {
     }
 }
 
-// FUNZIONE: Gestisce il click del mouse
+// MODIFICATA: Gestisce il click del mouse
 function mousePressed() {
     // Controllo pulsante Start Animation
     if (state.startButtonArea &&
@@ -996,8 +1175,15 @@ function mousePressed() {
         state.isPlaying = !state.isPlaying;
         
         if (state.isPlaying && state.availableYears.length > 0) {
+            state.animationSpeed = TIMELINE_ANIMATION_SPEED_FAST; // MODIFICATO: usa velocità più lenta
             state.animationTimer = 0;
             state.isPausedBetweenCycles = false;
+            
+            // MODIFICATO: usa animazioni veloci per i dots
+            state.useFastAnimations = true;
+            startFastDotAnimations();
+            
+            state.disableDotEntryAnimation = true;
             
             // Attiva l'anno solo se non è già attivo
             if (!state.yearActivatedByUser) {
@@ -1008,6 +1194,21 @@ function mousePressed() {
             }
         } else if (state.availableYears.length === 0) {
             state.isPlaying = false;
+        } else {
+            // MODIFICATO: torna a velocità normale e animazioni normali
+            state.animationSpeed = TIMELINE_ANIMATION_SPEED_NORMAL;
+            state.useFastAnimations = false;
+            state.disableDotEntryAnimation = false;
+            
+            state.dotAnimationStart = millis();
+            state.dotAnimationProgress = 0;
+            
+            state.dotAppearTimes.clear();
+            state.filteredData.forEach(v => {
+                let key = `${v.name}-${v.year}-${v.deaths}`;
+                const randomDelay = Math.random() * CONFIG.animation.randomDelayMax;
+                state.dotAppearTimes.set(key, randomDelay);
+            });
         }
         return;
     }
@@ -1071,6 +1272,9 @@ function mousePressed() {
         // Attiva l'anno (prima interazione utente)
         state.yearActivatedByUser = true;
         state.isPlaying = false; // Ferma l'animazione se era attiva
+        state.animationSpeed = TIMELINE_ANIMATION_SPEED_NORMAL; // MODIFICATO: velocità normale
+        state.useFastAnimations = false; // MODIFICATO: animazioni normali
+        state.disableDotEntryAnimation = false; // MODIFICATO: riabilita animazione dots
         
         if (state.timelineYear === null) {
             // Se non c'è un anno attivato, vai all'ultimo
@@ -1102,6 +1306,9 @@ function mousePressed() {
         // Attiva l'anno (prima interazione utente)
         state.yearActivatedByUser = true;
         state.isPlaying = false; // Ferma l'animazione se era attiva
+        state.animationSpeed = TIMELINE_ANIMATION_SPEED_NORMAL; // MODIFICATO: velocità normale
+        state.useFastAnimations = false; // MODIFICATO: animazioni normali
+        state.disableDotEntryAnimation = false; // MODIFICATO: riabilita animazione dots
         
         if (state.timelineYear === null) {
             // Se non c'è un anno attivato, vai al primo
@@ -1120,6 +1327,12 @@ function mousePressed() {
         state.timelineYear = state.availableYears[state.currentYearIndex];
         state.displayedYear = state.availableYears[state.currentYearIndex];
         return;
+    }
+    
+    // MODIFICATO: Aggiunto click sul cerchio per attivare animazione a onde
+    const d = dist(mouseX, mouseY, state.centerX, state.centerY);
+    if (d < CONFIG.layout.maxRadius * 1.5) {
+        triggerWaveAnimation();
     }
 }
 
